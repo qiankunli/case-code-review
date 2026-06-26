@@ -1,0 +1,9 @@
+case-code-review
+
+Built on top of open-code-review (ocr):
+  https://github.com/alibaba/open-code-review
+  Copyright the open-code-review authors. Licensed under the Apache License, Version 2.0.
+
+Seeded from open-code-review v1.6.1 plus local changes; engine foundation retained,
+then deepened (unit-level review, spec/case-aware context). See LICENSE for the full
+Apache-2.0 text.
