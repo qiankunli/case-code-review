@@ -34,7 +34,7 @@ diff ─Splitter─▶ diff unit ─抓上下文(caller/callee + spec-case 的 s
 
 ## 关键约定（核心四条）
 
-1. **评审语义 = 契约守恒，不是找语法 bug**：核对 diff 有没有破坏函数的 spec/case/rule 不变量；**语法交给 lint**。
+1. **评审语义 = 契约守恒，不是找语法 bug**：核对 diff 有没有破坏函数的 spec/case/rule 不变量；**语法 / 静态检查交给 lint 类工具**（Python `ruff`、Go `go build`/`go vet` 之类），不是 ccr 的活。
 2. **diff unit vs review unit 别混**：Splitter 从 diff 切出 diff unit；Merger 归并成 review unit（触发 loop 的那个，可能是单个、也可能是几个沿阶梯归并的更粗 unit）。成本超水位按文件归并——**降 loop 粒度、不降 context**。
 3. **边界现场算、`spec.json` 只语义**：函数边界评审时现场解析（`go/ast`/`python3`）、**永不落盘**（不 stale）；`spec.json` 只有 `FuncID → spec/cases/rules/links`、**无行号**；join key 是 unit-id `<relpath>::<symbol>`（与 spec-case 一致）。
 4. **上下文精干、重活按需**：spec/case/rule 与 link **指针**预注入；caller/callee、link 指向的 doc/函数**内容按需** tool 取，不预塞。
