@@ -467,8 +467,9 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 	var units []unit.Unit
 	for _, g := range groups {
 		if coarsen && len(g.units) > 1 {
-			fu, _ := unit.FileSplitter{}.Split(g.d)
-			units = append(units, fu...)
+			// Coalesce this file's functions into one file Unit (fewer loops),
+			// retaining their func ids so spec/case still resolves for it.
+			units = append(units, unit.CoalesceFile(g.d, g.units))
 			continue
 		}
 		units = append(units, g.units...)

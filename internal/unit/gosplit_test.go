@@ -63,7 +63,8 @@ func Beta(x int) int {
 	}
 
 	alpha := findUnit(t, units, "foo.go::Alpha")
-	if alpha.Scope != ScopeFunc || alpha.Symbol != "foo.go::Alpha" || alpha.Path != "foo.go" {
+	if alpha.Scope != ScopeFunc || alpha.Path != "foo.go" ||
+		len(alpha.Symbols) != 1 || alpha.Symbols[0] != "foo.go::Alpha" {
 		t.Errorf("alpha unit fields off: %+v", alpha)
 	}
 	if alpha.Insertions != 1 || alpha.Deletions != 1 {

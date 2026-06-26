@@ -29,8 +29,8 @@ func TestFileSplitter_OneUnitPerFile(t *testing.T) {
 	if u.ID != d.NewPath || u.Path != d.NewPath {
 		t.Errorf("identity: ID=%q Path=%q, want both %q", u.ID, u.Path, d.NewPath)
 	}
-	if u.Symbol != "" {
-		t.Errorf("file-scope unit should have empty Symbol, got %q", u.Symbol)
+	if len(u.Symbols) != 0 {
+		t.Errorf("file-scope unit should cover no functions, got Symbols %v", u.Symbols)
 	}
 	if u.Diff != d.Diff {
 		t.Errorf("Diff: got %q, want whole-file diff %q", u.Diff, d.Diff)

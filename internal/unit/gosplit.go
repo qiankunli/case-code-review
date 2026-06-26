@@ -60,7 +60,7 @@ func (GoFuncSplitter) Split(d model.Diff) ([]Unit, error) {
 			ID:         id,
 			Scope:      ScopeFunc,
 			Path:       d.NewPath,
-			Symbol:     id,
+			Symbols:    []string{id},
 			Diff:       header + renderHunks(hs),
 			Insertions: ins,
 			Deletions:  del,
