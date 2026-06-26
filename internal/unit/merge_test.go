@@ -20,11 +20,11 @@ func fileWith(path string, n int) FileDiffUnits {
 
 func TestWatermarkMerger_UnderWatermarkKeepsDiffUnits(t *testing.T) {
 	m := WatermarkMerger{Watermark: 10}
-	loop := m.Merge([]FileDiffUnits{fileWith("a.go", 2), fileWith("b.go", 1)})
-	if len(loop) != 3 {
-		t.Fatalf("under watermark: want 3 loop units (diff units kept), got %d", len(loop))
+	review := m.Merge([]FileDiffUnits{fileWith("a.go", 2), fileWith("b.go", 1)})
+	if len(review) != 3 {
+		t.Fatalf("under watermark: want 3 review units (diff units kept), got %d", len(review))
 	}
-	for _, u := range loop {
+	for _, u := range review {
 		if u.Scope != ScopeFunc {
 			t.Errorf("want func scope, got %v", u.Scope)
 		}
@@ -33,7 +33,7 @@ func TestWatermarkMerger_UnderWatermarkKeepsDiffUnits(t *testing.T) {
 
 func TestWatermarkMerger_OverWatermarkCoalescesMultiUnitFiles(t *testing.T) {
 	// 9 single-unit files + 1 two-unit file = 11 > 10: only the multi-unit file
-	// coalesces -> 9 func loop units + 1 file loop unit.
+	// coalesces -> 9 func review units + 1 file review unit.
 	var files []FileDiffUnits
 	for i := range 9 {
 		files = append(files, fileWith("s.go", 1))
@@ -42,9 +42,9 @@ func TestWatermarkMerger_OverWatermarkCoalescesMultiUnitFiles(t *testing.T) {
 	}
 	files = append(files, fileWith("multi.go", 2))
 
-	loop := WatermarkMerger{Watermark: 10}.Merge(files)
+	review := WatermarkMerger{Watermark: 10}.Merge(files)
 	funcs, fileUnits := 0, 0
-	for _, u := range loop {
+	for _, u := range review {
 		switch u.Scope {
 		case ScopeFunc:
 			funcs++
@@ -53,6 +53,6 @@ func TestWatermarkMerger_OverWatermarkCoalescesMultiUnitFiles(t *testing.T) {
 		}
 	}
 	if funcs != 9 || fileUnits != 1 {
-		t.Fatalf("want 9 func + 1 file loop unit, got %d func + %d file", funcs, fileUnits)
+		t.Fatalf("want 9 func + 1 file review unit, got %d func + %d file", funcs, fileUnits)
 	}
 }
