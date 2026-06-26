@@ -47,6 +47,10 @@ type Unit struct {
 	// small function in a large file is sized by its own change, not the file's.
 	Insertions int64
 	Deletions  int64
+	// Clues are the context pieces ClueFinders found for this Unit (spec,
+	// rule, link, …). Filled on the diff unit before merge; CoalesceFile unions
+	// the members' clues so a coalesced file Unit keeps them all.
+	Clues []Clue
 }
 
 // Splitter turns one file's diff into one or more review Units. The default
@@ -81,6 +85,7 @@ func CoalesceFile(d model.Diff, members []Unit) Unit {
 	merged := u[0]
 	for _, m := range members {
 		merged.Symbols = append(merged.Symbols, m.Symbols...)
+		merged.Clues = addClues(merged.Clues, m.Clues)
 	}
 	return merged
 }
