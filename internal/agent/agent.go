@@ -18,6 +18,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/llmloop"
 	"github.com/qiankunli/case-code-review/internal/model"
 	"github.com/qiankunli/case-code-review/internal/session"
+	"github.com/qiankunli/case-code-review/internal/spec"
 	"github.com/qiankunli/case-code-review/internal/stdout"
 	"github.com/qiankunli/case-code-review/internal/telemetry"
 	"github.com/qiankunli/case-code-review/internal/tool"
@@ -99,6 +100,11 @@ type Args struct {
 	// Background is an optional requirement/business context string
 	// injected into plan and main_task prompts via {{requirement_background}}.
 	Background string
+
+	// SpecIndex is the loaded spec.json (unit-id -> spec/cases). A review Unit's
+	// covered functions are looked up here and injected as the contract checklist
+	// via {{spec_cases}}. Nil when no spec.json is configured.
+	SpecIndex spec.Index
 
 	// Model is the user-configured model name used as fallback when
 	// template phases (plan/memory_compression) don't specify one.
@@ -535,6 +541,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
 		content = strings.ReplaceAll(content, "{{diff}}", u.Diff)
 		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
+		content = strings.ReplaceAll(content, "{{spec_cases}}", a.args.SpecIndex.Render(u.Symbols))
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no
 		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
