@@ -6,14 +6,14 @@
 
 `ccr` lifts the unit of review from **file** to **unit** (`diff → unit → unit context → review loop`; a file is just the degenerate unit), so each unit carries **precise spec/case context** and runs its own independent review loop.
 
-The name: a unit is the review-side twin of e2e-harness's `common.Case` — one "requirement/contract" asset, consumed black-box by harnesses and white-box by review.
+The name: `ccr` binds each review unit to the **spec/case** (the requirement/contract a change must satisfy) — case-driven, white-box code review.
 
 Two extension points:
 
 - **`UnitSplitter`** (`diff → unit`): file-level by default; a language-aware impl (Go `go/ast`) splits down to function level.
 - **`ContextBuilder`** (`unit → unit context`): kept lean — only cheap, bounded, known-relevant context (spec/case, rule, symbol identity). Callers/callees and other expansions are pulled on demand by the review loop's tool calls, not pre-built.
 
-spec/case sources and per-language expression live in the separate `spec-case` project (shared with e2e-harness).
+spec/case sources and per-language expression live in the separate [`spec-case`](https://github.com/qiankunli/spec-case) project.
 
 ## Status
 
