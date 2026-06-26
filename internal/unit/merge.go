@@ -6,13 +6,13 @@ import "github.com/qiankunli/case-code-review/internal/model"
 //
 //   - a DIFF UNIT is what a Splitter finds in one file's diff — one per changed
 //     function, plus a residual for changes outside any function.
-//   - a LOOP UNIT is what a Merger consolidates the diff units into — the unit
-//     that actually triggers a review loop. A loop unit is a diff unit as-is, or
+//   - a REVIEW UNIT is what a Merger consolidates the diff units into — the unit
+//     that actually triggers a review loop. A review unit is a diff unit as-is, or
 //     several diff units coalesced up the granularity ladder (function → class →
 //     file → module/directory) when a change is large.
 //
 // Two stages, two abstractions: Splitter (diff → diff units) and Merger (diff
-// units → loop units).
+// units → review units).
 
 // FileDiffUnits pairs one file's diff units with their source diff. It is the
 // input to a Merger, which needs the file diff to build a coalesced file unit.
@@ -21,16 +21,16 @@ type FileDiffUnits struct {
 	Units []Unit
 }
 
-// Merger consolidates per-file diff units into loop units, coarsening up the
+// Merger consolidates per-file diff units into review units, coarsening up the
 // granularity ladder by a strategy when there are too many — trading
 // per-function focus for fewer review loops.
 type Merger interface {
 	Merge(files []FileDiffUnits) []Unit
 }
 
-// WatermarkMerger keeps diff units as loop units until their total exceeds
+// WatermarkMerger keeps diff units as review units until their total exceeds
 // Watermark, then coalesces each file that split into more than one unit into a
-// single file loop unit. This is the function → file rung of the ladder; class
+// single file review unit. This is the function → file rung of the ladder; class
 // and module/directory rungs are future strategies. Coalescing preserves spec
 // context (CoalesceFile unions the members' function ids), so the governor caps
 // loop count, not context.
@@ -45,13 +45,13 @@ func (m WatermarkMerger) Merge(files []FileDiffUnits) []Unit {
 	}
 	coarsen := total > m.Watermark
 
-	var loop []Unit
+	var review []Unit
 	for _, f := range files {
 		if coarsen && len(f.Units) > 1 {
-			loop = append(loop, CoalesceFile(f.Diff, f.Units))
+			review = append(review, CoalesceFile(f.Diff, f.Units))
 			continue
 		}
-		loop = append(loop, f.Units...)
+		review = append(review, f.Units...)
 	}
-	return loop
+	return review
 }

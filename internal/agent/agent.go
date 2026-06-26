@@ -132,7 +132,7 @@ type Agent struct {
 	unitFailed      int64 // count of failed unit reviews, accessed atomically
 	runner          *llmloop.Runner
 	// splitter turns each changed file's diff into diff units (one per changed
-	// function); merger consolidates those into loop units (what actually
+	// function); merger consolidates those into review units (what actually
 	// triggers a review loop). Both set in New().
 	splitter unit.Splitter
 	merger   unit.Merger
@@ -164,7 +164,7 @@ func New(args Args) *Agent {
 		session: args.Session,
 		// AutoSplitter cuts each file to function-level diff units by language (Go
 		// via go/ast, Python via python3), degrading to file scope otherwise;
-		// WatermarkMerger coalesces them into loop units above the watermark.
+		// WatermarkMerger coalesces them into review units above the watermark.
 		splitter: unit.AutoSplitter{},
 		merger:   unit.WatermarkMerger{Watermark: defaultUnitWatermark},
 	}
@@ -448,9 +448,9 @@ func (a *Agent) runReviewFilters(ctx context.Context) {
 // granularity to bring the loop count back down.
 const defaultUnitWatermark = 10
 
-// splitUnits produces the loop units for the review in two stages: the Splitter
+// splitUnits produces the review units for the review in two stages: the Splitter
 // turns each non-deleted file's diff into diff units (one per changed function),
-// then the Merger consolidates them into loop units — coalescing up the
+// then the Merger consolidates them into review units — coalescing up the
 // granularity ladder when there are too many (the cost governor). Deleted files
 // are skipped.
 func (a *Agent) splitUnits() ([]unit.Unit, error) {
@@ -467,7 +467,7 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 		files = append(files, unit.FileDiffUnits{Diff: a.diffs[i], Units: diffUnits})
 	}
 
-	// Stage 2 — merge: diff units → loop units (coalesced up the ladder when too many).
+	// Stage 2 — merge: diff units → review units (coalesced up the ladder when too many).
 	merger := a.merger
 	if merger == nil {
 		merger = unit.WatermarkMerger{Watermark: defaultUnitWatermark}
