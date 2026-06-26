@@ -2,36 +2,31 @@
 
 > AI-powered code review CLI — built on top of [open-code-review](https://github.com/alibaba/open-code-review) and deepened further. ｜ 中文见 [README.zh-CN.md](./README.zh-CN.md)
 
-## Why
+## Philosophy
 
-Most AI code review reads a diff in isolation. It can flag style or a local bug, but it can't tell whether a change **breaks the requirement it serves** or **the code that depends on it** — those answers need context the diff doesn't carry.
+A diff alone is too little to review well — it can't tell whether a change breaks the requirement it serves or the code that depends on it. ccr builds on open-code-review (ocr) with two ideas:
 
-ccr's bet: **review a change together with the context bound to it.**
+**1. Capture more context.** ccr locates the *functions* a diff changes, then gathers the context the diff doesn't carry:
 
-## How it works
+- the function's **caller / callee neighborhood** — who depends on it, what it relies on; and
+- the **spec / case / rule / link** the author attached to the function — its contract, scenarios, review criteria, and curated "see also".
 
-```
-diff → function → gather the function's bound context → coalesce by file if too many → one review loop per unit
-```
+**2. Review per *unit*, not per file.** ocr triggers one review loop per **file**. ccr introduces the **unit** — a function is a unit, a file the degenerate case — and triggers one loop per unit. Each changed function is reviewed on its own, focused, not diluted by unrelated changes in the same file. When a change touches many functions, ccr coalesces a file's functions back into one loop above a threshold, so cost stays bounded.
 
-1. **Function, not file.** A diff is split into the *functions* it changes (Go and Python today; other files fall back to file scope). Each changed function gets its own focused review loop — not diluted by unrelated changes in the same file.
+The payoff: ccr finds the bugs that need background — a change quietly breaking a caller's assumption, or violating an invariant the diff doesn't show — checklist-checked against the function's real contract. (Syntax stays lint's job.)
 
-2. **Find the bugs that need context.** ccr *is* hunting bugs — but the ones that matter aren't local syntax (that's lint's job); they're a change that quietly breaks a caller's assumption or violates an invariant the diff doesn't show. Finding those needs background. The contract (spec/case) makes the question concrete — *does this change still satisfy what the function must guarantee?* — so it's checklist-checking against real contracts, not open-ended guessing.
+## The four context dimensions
 
-3. **Four kinds of context** — authored on the function, injected when its change is reviewed:
+Authored on the function, in the separate [`spec-case`](https://github.com/qiankunli/spec-case) project (Go markers / Python decorators):
 
-   | dimension | answers |
-   |---|---|
-   | **spec** | the function's contract (what it must guarantee) |
-   | **case** | concrete scenarios to verify |
-   | **rule** | review criteria — what to watch for |
-   | **link** | curated "see also" — a doc, or another function to keep consistent |
+| dimension | answers |
+|---|---|
+| **spec** | the function's contract (what it must guarantee) |
+| **case** | concrete scenarios to verify |
+| **rule** | review criteria — what to watch for |
+| **link** | curated "see also" — a doc, or another function to keep consistent |
 
-   Context is kept **lean**: bounded, known-relevant context is injected up front; broader expansion (callers, callees, linked docs) is fetched on demand during review.
-
-4. **Bounded cost.** When a change touches many functions, ccr coalesces a file's functions back into one review loop above a threshold — trading per-function focus for fewer LLM calls, never dropping the gathered context.
-
-The four context dimensions and their per-language authoring (Go markers / Python decorators) live in the separate [`spec-case`](https://github.com/qiankunli/spec-case) project.
+Context is kept **lean**: bounded, known-relevant context is injected up front; broader expansion (callers, callees, linked docs) is fetched on demand during review.
 
 ## Status
 
