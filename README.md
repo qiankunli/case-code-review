@@ -2,22 +2,40 @@
 
 > AI-powered code review CLI — built on top of [open-code-review](https://github.com/alibaba/open-code-review) and deepened further. ｜ 中文见 [README.zh-CN.md](./README.zh-CN.md)
 
-## What it is
+## Why
 
-`ccr` lifts the unit of review from **file** to **unit** (`diff → unit → unit context → review loop`; a file is just the degenerate unit), so each unit carries **precise spec/case context** and runs its own independent review loop.
+Most AI code review reads a diff in isolation. It can flag style or a local bug, but it can't tell whether a change **breaks the requirement it serves** or **the code that depends on it** — those answers need context the diff doesn't carry.
 
-The name: `ccr` binds each review unit to the **spec/case** (the requirement/contract a change must satisfy) — case-driven, white-box code review.
+ccr's bet: **review a change together with the context bound to it.**
 
-Two extension points:
+## How it works
 
-- **`UnitSplitter`** (`diff → unit`): file-level by default; a language-aware impl (Go `go/ast`) splits down to function level.
-- **`ContextBuilder`** (`unit → unit context`): kept lean — only cheap, bounded, known-relevant context (spec/case, rule, symbol identity). Callers/callees and other expansions are pulled on demand by the review loop's tool calls, not pre-built.
+```
+diff → function → gather the function's bound context → coalesce by file if too many → one review loop per unit
+```
 
-spec/case sources and per-language expression live in the separate [`spec-case`](https://github.com/qiankunli/spec-case) project.
+1. **Function, not file.** A diff is split into the *functions* it changes (Go and Python today; other files fall back to file scope). Each changed function gets its own focused review loop — not diluted by unrelated changes in the same file.
+
+2. **Contract preservation, not bug hunting.** Syntax is lint's job, not ccr's. ccr asks: *does this change still satisfy the contract governing the function?* Because contracts are concrete, review becomes checklist-checking rather than open-ended reasoning.
+
+3. **Four kinds of context** — authored on the function, injected when its change is reviewed:
+
+   | dimension | answers |
+   |---|---|
+   | **spec** | the function's contract (what it must guarantee) |
+   | **case** | concrete scenarios to verify |
+   | **rule** | review criteria — what to watch for |
+   | **link** | curated "see also" — a doc, or another function to keep consistent |
+
+   Context is kept **lean**: bounded, known-relevant context is injected up front; broader expansion (callers, callees, linked docs) is fetched on demand during review.
+
+4. **Bounded cost.** When a change touches many functions, ccr coalesces a file's functions back into one review loop above a threshold — trading per-function focus for fewer LLM calls, never dropping the gathered context.
+
+The four context dimensions and their per-language authoring (Go markers / Python decorators) live in the separate [`spec-case`](https://github.com/qiankunli/spec-case) project.
 
 ## Status
 
-Early WIP.
+Early WIP. Function-level splitting (Go + Python), the cost governor, and spec/case/rule/link injection are in; deeper context (walking callers up to the governing spec) is on the roadmap.
 
 ## License
 
