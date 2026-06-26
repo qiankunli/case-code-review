@@ -11,23 +11,35 @@
 
 ## 代码地图与核心模块
 
-- `cmd/ccr/` — CLI 入口（review / scan / config / provider / rules / viewer 等子命令）；组装 Args、加载 spec.json、构建工具注册表。
-- `internal/unit/` — **Unit 抽象 + 两阶段**：`Splitter` 把一个文件 diff 切成 **diff unit**（`AutoSplitter` 路由 Go `go/ast` / Python `python3`，否则退 file）；`Merger` 把 diff unit 归并成 **review unit**（`WatermarkMerger` 超水位按文件 coalesce，保留 spec context）。
-- `internal/spec/` — 消费 `spec.json`（unit-id → spec/cases/rules/links），渲染成评审上下文（SpecBuilder/RuleBuilder/LinkBuilder 的逻辑）。
-- `internal/agent/` — 评审编排：`split → merge → 每个 review unit 一个 loop`，注入 spec/case + rule（合并 rule.json）+ link（指针）；review-filter 按**文件**级后处理。
-- `internal/diff/` — diff/hunk 解析与评论行号解析；`internal/llmloop/` — agentic 评审 loop（复用 ocr 引擎）；`internal/config/` — 模板 prompt、`rule.json`、tools 配置。
-- 其余 `model`/`gitcmd`/`session`/`telemetry`/`tool`/`scan`/`viewer` 等为支撑模块。
+```
+case-code-review/
+├── cmd/ccr/        CLI 入口：review/scan/config/… 子命令；组装 Args、加载 spec.json
+└── internal/
+    ├── unit/       ★ Unit 两阶段——Splitter→diff unit（AutoSplitter：Go go/ast、Python python3）；Merger→review unit（WatermarkMerger 归并）
+    ├── spec/       ★ 消费 spec.json（spec/case/rule/link）→ 渲染评审上下文
+    ├── agent/      ★ 评审编排：split→merge→每 review unit 一个 loop；注入上下文；file 级 review-filter
+    ├── diff/       diff/hunk 解析、评论行号解析
+    ├── llmloop/    agentic 评审 loop（复用 ocr 引擎）
+    ├── config/     模板 prompt、rule.json、tools 配置
+    └── model · gitcmd · session · telemetry · tool · scan · viewer …   支撑模块
+```
 
-## 关键约定
+**主链路**：
 
-- **评审语义 = 契约守恒**：核对 diff 有没有破坏函数的 spec/case/rule 不变量；**语法交给 lint，不是 ccr 的活**。
-- **两阶段术语别混**：**diff unit**（Splitter 从 diff 发现，一函数一个）vs **review unit**（Merger 归并后、真正触发 loop 的；可能是单个 diff unit，也可能是几个沿阶梯归并成的更粗 unit）。
-- **函数边界评审时现场算、永不落盘**（Go `go/ast`、Python `python3`，新鲜、不 stale）；**`spec.json` 只有语义**（FuncID → spec/cases/rules/links），**无行号**。
-- **unit-id = `<relpath>::<symbol>`**——specgen 与 ccr 共用的 join key（与 spec-case 一致）。
-- **上下文精干**：spec/case/rule 与 link **指针**预注入；caller/callee、link 指向的 doc/函数**内容按需** tool 取，不预塞。
-- **成本有界**：review unit 数超水位（`WatermarkMerger`）按文件归并——**降 loop 粒度、不降 context**（coalesce 取 spec 并集）。
-- **公开仓**：不得引用任何内网仓 / 机器相关绝对路径。
-- **Go 改动后**先 `go build ./...` / `go test ./...` 再提交。
+```
+diff ─Splitter─▶ diff unit ─抓上下文(caller/callee + spec-case 的 spec/case/rule/link)─▶ Merger ─▶ review unit ─▶ review loop
+```
+
+> 即：从 diff 切出 diff unit → 为每个 diff unit 沿 caller/callee 抓上下文、并挂上它在 spec-case 里的 spec/case/rule/link → 归并成 review unit → 一个 review unit 一个 review loop。（caller/callee 抓取是路线图上的重件，依赖 call-graph。）
+
+## 关键约定（核心四条）
+
+1. **评审语义 = 契约守恒，不是找语法 bug**：核对 diff 有没有破坏函数的 spec/case/rule 不变量；**语法交给 lint**。
+2. **diff unit vs review unit 别混**：Splitter 从 diff 切出 diff unit；Merger 归并成 review unit（触发 loop 的那个，可能是单个、也可能是几个沿阶梯归并的更粗 unit）。成本超水位按文件归并——**降 loop 粒度、不降 context**。
+3. **边界现场算、`spec.json` 只语义**：函数边界评审时现场解析（`go/ast`/`python3`）、**永不落盘**（不 stale）；`spec.json` 只有 `FuncID → spec/cases/rules/links`、**无行号**；join key 是 unit-id `<relpath>::<symbol>`（与 spec-case 一致）。
+4. **上下文精干、重活按需**：spec/case/rule 与 link **指针**预注入；caller/callee、link 指向的 doc/函数**内容按需** tool 取，不预塞。
+
+> 另：公开仓不引内网仓 / 机器相关绝对路径；Go 改动先 `go build ./...` / `go test ./...` 再提交。
 
 ## References
 
