@@ -11,7 +11,7 @@ A diff alone is too little to review well — it can't tell whether a change bre
 - the function's **caller / callee neighborhood** — who depends on it, what it relies on; and
 - the **spec / case / rule / link** the author attached to the function — its contract, scenarios, review criteria, and curated "see also".
 
-**2. Review per *unit*, not per file.** ocr triggers one review loop per **file**. ccr introduces the **unit** — a function is a unit, a file the degenerate case — and triggers one loop per unit. Each changed function is reviewed on its own, focused, not diluted by unrelated changes in the same file. When a change touches many functions, ccr coalesces a file's functions back into one loop above a threshold, so cost stays bounded.
+**2. Review per *unit*, with a merge step.** A *unit* is the scope of one review loop. ocr only reviews per **file**; ccr makes the unit the granularity, on a ladder: **function → class → file → module / directory**. From a diff ccr first collects the changed units (functions), then **merges** them — by a strategy — into the units that actually trigger loops, coarsening *up that ladder* as the change grows: a file's many changed functions become one file unit; a sweeping change becomes file- or even directory-level units. So focus is highest for small changes and cost stays bounded for big ones — one loop per merged unit.
 
 The payoff: ccr finds the bugs that need background — a change quietly breaking a caller's assumption, or violating an invariant the diff doesn't show — checklist-checked against the function's real contract. (Syntax stays lint's job.)
 
