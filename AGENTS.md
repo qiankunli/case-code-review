@@ -39,7 +39,7 @@ diff ─Splitter─▶ diff unit ─抓上下文(caller/callee + spec-case 的 s
 3. **边界现场算、`spec.json` 只语义**：函数边界评审时现场解析（`go/ast`/`python3`）、**永不落盘**（不 stale）；`spec.json` 只有 `FuncID → spec/cases/rules/links`、**无行号**；join key 是 unit-id `<relpath>::<symbol>`（与 spec-case 一致）。
 4. **上下文精干、重活按需**：spec/case/rule 与 link **指针**预注入；caller/callee、link 指向的 doc/函数**内容按需** tool 取，不预塞。
 
-> 另：公开仓不引内网仓 / 机器相关绝对路径；Go 改动先 `go build ./...` / `go test ./...` 再提交。
+> 另：Go 改动先 `go build ./...` / `go test ./...` 再提交。
 
 ## References
 
