@@ -131,10 +131,11 @@ type Agent struct {
 	session         *session.SessionHistory
 	unitFailed      int64 // count of failed unit reviews, accessed atomically
 	runner          *llmloop.Runner
-	// splitter turns each changed file's diff into one or more review Units.
-	// Set in New(); file is the degenerate unit (FileSplitter), finer
-	// splitters are swapped in for function-level review.
+	// splitter turns each changed file's diff into diff units (one per changed
+	// function); merger consolidates those into loop units (what actually
+	// triggers a review loop). Both set in New().
 	splitter unit.Splitter
+	merger   unit.Merger
 }
 
 // New creates a new Agent from the given arguments.
@@ -161,9 +162,11 @@ func New(args Args) *Agent {
 	a := &Agent{
 		args:    args,
 		session: args.Session,
-		// AutoSplitter cuts each file to function-level Units by language (Go via
-		// go/ast, Python via python3) and degrades to file scope otherwise.
+		// AutoSplitter cuts each file to function-level diff units by language (Go
+		// via go/ast, Python via python3), degrading to file scope otherwise;
+		// WatermarkMerger coalesces them into loop units above the watermark.
 		splitter: unit.AutoSplitter{},
+		merger:   unit.WatermarkMerger{Watermark: defaultUnitWatermark},
 	}
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
@@ -445,43 +448,31 @@ func (a *Agent) runReviewFilters(ctx context.Context) {
 // granularity to bring the loop count back down.
 const defaultUnitWatermark = 10
 
-// splitUnits runs the configured Splitter over each non-deleted file diff and
-// applies the cost governor (§2.5): when the total Unit count exceeds the
-// budget, files that split into more than one Unit are coarsened back to a
-// single file Unit — trading per-function focus for fewer review loops. Spec
-// context (when present) rides whatever granularity survives; the governor caps
-// loop count, it does not drop context. Deleted files are skipped.
+// splitUnits produces the loop units for the review in two stages: the Splitter
+// turns each non-deleted file's diff into diff units (one per changed function),
+// then the Merger consolidates them into loop units — coalescing up the
+// granularity ladder when there are too many (the cost governor). Deleted files
+// are skipped.
 func (a *Agent) splitUnits() ([]unit.Unit, error) {
-	type group struct {
-		d     model.Diff
-		units []unit.Unit
-	}
-	var groups []group
-	total := 0
+	// Stage 1 — split: each non-deleted file's diff → diff units.
+	var files []unit.FileDiffUnits
 	for i := range a.diffs {
 		if a.diffs[i].IsDeleted {
 			continue
 		}
-		us, err := a.splitter.Split(a.diffs[i])
+		diffUnits, err := a.splitter.Split(a.diffs[i])
 		if err != nil {
 			return nil, fmt.Errorf("split units for %s: %w", a.diffs[i].NewPath, err)
 		}
-		groups = append(groups, group{a.diffs[i], us})
-		total += len(us)
+		files = append(files, unit.FileDiffUnits{Diff: a.diffs[i], Units: diffUnits})
 	}
 
-	coarsen := total > defaultUnitWatermark
-	var units []unit.Unit
-	for _, g := range groups {
-		if coarsen && len(g.units) > 1 {
-			// Coalesce this file's functions into one file Unit (fewer loops),
-			// retaining their func ids so spec/case still resolves for it.
-			units = append(units, unit.CoalesceFile(g.d, g.units))
-			continue
-		}
-		units = append(units, g.units...)
+	// Stage 2 — merge: diff units → loop units (coalesced up the ladder when too many).
+	merger := a.merger
+	if merger == nil {
+		merger = unit.WatermarkMerger{Watermark: defaultUnitWatermark}
 	}
-	return units, nil
+	return merger.Merge(files), nil
 }
 
 // reviewUnit performs the Plan Phase + Main Loop for a single review Unit.
