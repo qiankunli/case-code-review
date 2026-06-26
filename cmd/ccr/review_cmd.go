@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/agent"
+	"github.com/qiankunli/case-code-review/internal/spec"
 	"github.com/qiankunli/case-code-review/internal/telemetry"
 	"github.com/qiankunli/case-code-review/internal/tool"
 )
@@ -61,6 +62,13 @@ func runReview(args []string) error {
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
+	// Loads the --spec path plus auto-discovered .ccr/spec.json layers, mirroring
+	// how rules are resolved. Nil when no layer exists.
+	specIndex, err := spec.Load(cc.RepoDir, opts.specPath)
+	if err != nil {
+		return fmt.Errorf("load spec: %w", err)
+	}
+
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
 		From:                  opts.from,
@@ -79,6 +87,7 @@ func runReview(args []string) error {
 		ConcurrentTaskTimeout: opts.perFileTimeout,
 		Model:                 rt.Model,
 		Background:            opts.background,
+		SpecIndex:             specIndex,
 		GitRunner:             cc.GitRunner,
 	})
 
