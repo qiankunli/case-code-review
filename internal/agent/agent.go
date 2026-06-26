@@ -136,6 +136,9 @@ type Agent struct {
 	// triggers a review loop). Both set in New().
 	splitter unit.Splitter
 	merger   unit.Merger
+	// finders fill each diff unit's Clues (spec/rule/link context) before merge.
+	// caller/callee finders will join here once the call graph exists.
+	finders []unit.ClueFinder
 }
 
 // New creates a new Agent from the given arguments.
@@ -167,6 +170,13 @@ func New(args Args) *Agent {
 		// WatermarkMerger coalesces them into review units above the watermark.
 		splitter: unit.AutoSplitter{},
 		merger:   unit.WatermarkMerger{Watermark: defaultUnitWatermark},
+		// spec.json-backed finders fill each diff unit's Clues. caller/callee
+		// finders (call-graph) will append here later.
+		finders: []unit.ClueFinder{
+			spec.SpecFinder{Index: args.SpecIndex},
+			spec.RuleFinder{Index: args.SpecIndex},
+			spec.LinkFinder{Index: args.SpecIndex},
+		},
 	}
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
@@ -464,6 +474,11 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 		if err != nil {
 			return nil, fmt.Errorf("split units for %s: %w", a.diffs[i].NewPath, err)
 		}
+		// Stage 1.5 — find context: fill each diff unit's Clues before merge,
+		// so a coalesced file unit unions its functions' clues.
+		for j := range diffUnits {
+			diffUnits[j].Clues = a.findClues(diffUnits[j])
+		}
 		files = append(files, unit.FileDiffUnits{Diff: a.diffs[i], Units: diffUnits})
 	}
 
@@ -473,6 +488,33 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 		merger = unit.WatermarkMerger{Watermark: defaultUnitWatermark}
 	}
 	return merger.Merge(files), nil
+}
+
+// findClues runs every ClueFinder over a diff unit and concatenates the clues.
+func (a *Agent) findClues(u unit.Unit) []unit.Clue {
+	var clues []unit.Clue
+	for _, f := range a.finders {
+		clues = append(clues, f.Find(u)...)
+	}
+	return clues
+}
+
+// renderClues groups a review unit's clues into the prompt's context blocks: the
+// spec/case contract ({{spec_cases}}), the @rule criteria, and the see-also
+// links ({{see_also}}). The rule.json text is merged with rules by the caller.
+func renderClues(clues []unit.Clue) (specCases, rules, seeAlso string) {
+	var specBlocks, ruleLines, linkLines []string
+	for _, c := range clues {
+		switch c.Kind {
+		case unit.ClueSpec:
+			specBlocks = append(specBlocks, c.Text)
+		case unit.ClueRule:
+			ruleLines = append(ruleLines, "- "+c.Text)
+		case unit.ClueLink:
+			linkLines = append(linkLines, "- "+c.Text)
+		}
+	}
+	return strings.Join(specBlocks, "\n"), strings.Join(ruleLines, "\n"), strings.Join(linkLines, "\n")
 }
 
 // reviewUnit performs the Plan Phase + Main Loop for a single review Unit.
@@ -493,10 +535,12 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	// Build change-files list excluding current file
 	changeFilesExcludingCurrent := a.buildChangeFilesExcept(newPath)
 
+	// Render this unit's found context (clues) into the prompt blocks.
+	specCases, specRules, seeAlso := renderClues(u.Clues)
+	// Per-function @rule (from clues) augments the path-glob rule.json criteria;
+	// both flow into {{system_rule}} (plan + main).
 	rule := a.resolveSystemRule(strings.ToLower(newPath))
-	// RuleBuilder: per-function @rule (from spec.json) augments the path-glob
-	// rule.json criteria. Both flow into {{system_rule}} (plan + main).
-	if specRules := a.args.SpecIndex.RenderRules(u.Symbols); specRules != "" {
+	if specRules != "" {
 		if rule != "" {
 			rule += "\n"
 		}
@@ -540,9 +584,9 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
 		content = strings.ReplaceAll(content, "{{diff}}", u.Diff)
 		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
-		content = strings.ReplaceAll(content, "{{spec_cases}}", a.args.SpecIndex.Render(u.Symbols))
-		// LinkBuilder: curated see-also pointers; the reviewer fetches content on demand.
-		content = strings.ReplaceAll(content, "{{see_also}}", a.args.SpecIndex.RenderLinks(u.Symbols))
+		content = strings.ReplaceAll(content, "{{spec_cases}}", specCases)
+		// Curated see-also pointers; the reviewer fetches content on demand.
+		content = strings.ReplaceAll(content, "{{see_also}}", seeAlso)
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no
 		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
