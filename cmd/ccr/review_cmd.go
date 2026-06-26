@@ -62,12 +62,11 @@ func runReview(args []string) error {
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
-	var specIndex spec.Index
-	if opts.specJSON != "" {
-		specIndex, err = spec.Load(opts.specJSON)
-		if err != nil {
-			return fmt.Errorf("load --spec-json: %w", err)
-		}
+	// Loads the --spec path plus auto-discovered .ccr/spec.json layers, mirroring
+	// how rules are resolved. Nil when no layer exists.
+	specIndex, err := spec.Load(cc.RepoDir, opts.specPath)
+	if err != nil {
+		return fmt.Errorf("load spec: %w", err)
 	}
 
 	ag := agent.New(agent.Args{
