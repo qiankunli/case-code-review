@@ -434,9 +434,10 @@ func (a *Agent) runReviewFilters(ctx context.Context) {
 	wg.Wait()
 }
 
-// defaultUnitBudget caps how many review Units (≈ LLM loops) a single review
-// fans out into before the cost governor coarsens granularity.
-const defaultUnitBudget = 10
+// defaultUnitWatermark is the high-water mark on review Units (≈ LLM loops) for
+// one review: once the total rises above it, the cost governor coarsens
+// granularity to bring the loop count back down.
+const defaultUnitWatermark = 10
 
 // splitUnits runs the configured Splitter over each non-deleted file diff and
 // applies the cost governor (§2.5): when the total Unit count exceeds the
@@ -463,7 +464,7 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 		total += len(us)
 	}
 
-	coarsen := total > defaultUnitBudget
+	coarsen := total > defaultUnitWatermark
 	var units []unit.Unit
 	for _, g := range groups {
 		if coarsen && len(g.units) > 1 {

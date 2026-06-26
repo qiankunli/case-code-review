@@ -55,12 +55,12 @@ func TestSplitUnits_UnderBudgetKeepsFunctions(t *testing.T) {
 
 func TestSplitUnits_GovernorCoarsensSingleFile(t *testing.T) {
 	// One file splitting into more Units than the budget coarsens to one file Unit.
-	units := splitWith(t, goDiff("p.go", defaultUnitBudget+2))
+	units := splitWith(t, goDiff("p.go", defaultUnitWatermark+2))
 	if len(units) != 1 || units[0].Scope != unit.ScopeFile {
 		t.Fatalf("want 1 coalesced file unit, got %d (%+v)", len(units), units)
 	}
-	if len(units[0].Symbols) != defaultUnitBudget+2 {
-		t.Errorf("coalesced unit should retain all %d func ids, got %d", defaultUnitBudget+2, len(units[0].Symbols))
+	if len(units[0].Symbols) != defaultUnitWatermark+2 {
+		t.Errorf("coalesced unit should retain all %d func ids, got %d", defaultUnitWatermark+2, len(units[0].Symbols))
 	}
 }
 
