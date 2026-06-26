@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/agent"
+	"github.com/qiankunli/case-code-review/internal/spec"
 	"github.com/qiankunli/case-code-review/internal/telemetry"
 	"github.com/qiankunli/case-code-review/internal/tool"
 )
@@ -61,6 +62,14 @@ func runReview(args []string) error {
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
+	var specIndex spec.Index
+	if opts.specJSON != "" {
+		specIndex, err = spec.Load(opts.specJSON)
+		if err != nil {
+			return fmt.Errorf("load --spec-json: %w", err)
+		}
+	}
+
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
 		From:                  opts.from,
@@ -79,6 +88,7 @@ func runReview(args []string) error {
 		ConcurrentTaskTimeout: opts.perFileTimeout,
 		Model:                 rt.Model,
 		Background:            opts.background,
+		SpecIndex:             specIndex,
 		GitRunner:             cc.GitRunner,
 	})
 
