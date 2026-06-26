@@ -16,7 +16,7 @@ diff → function → gather the function's bound context → coalesce by file i
 
 1. **Function, not file.** A diff is split into the *functions* it changes (Go and Python today; other files fall back to file scope). Each changed function gets its own focused review loop — not diluted by unrelated changes in the same file.
 
-2. **Contract preservation, not bug hunting.** Syntax is lint's job, not ccr's. ccr asks: *does this change still satisfy the contract governing the function?* Because contracts are concrete, review becomes checklist-checking rather than open-ended reasoning.
+2. **Find the bugs that need context.** ccr *is* hunting bugs — but the ones that matter aren't local syntax (that's lint's job); they're a change that quietly breaks a caller's assumption or violates an invariant the diff doesn't show. Finding those needs background. The contract (spec/case) makes the question concrete — *does this change still satisfy what the function must guarantee?* — so it's checklist-checking against real contracts, not open-ended guessing.
 
 3. **Four kinds of context** — authored on the function, injected when its change is reviewed:
 
