@@ -21,10 +21,12 @@ import (
 // as the agent's splitter.
 type GoFuncSplitter struct{}
 
-// funcSpan is one top-level function's line range and identity in the new file.
+// funcSpan is one function's line range and unit-id in the new file. Its source
+// is the only thing that differs between splitters: GoFuncSplitter computes it
+// from go/ast, IndexSplitter reads it from an externally-produced func-index.
 type funcSpan struct {
-	start, end int // 1-indexed line range in the new file, inclusive
-	recv, name string
+	start, end int    // 1-indexed line range in the new file, inclusive
+	id         string // the function's unit-id (FuncID)
 }
 
 func (GoFuncSplitter) Split(d model.Diff) ([]Unit, error) {
@@ -37,7 +39,15 @@ func (GoFuncSplitter) Split(d model.Diff) ([]Unit, error) {
 		// review the whole file.
 		return FileSplitter{}.Split(d)
 	}
+	return splitByFuncSpans(d, spans), nil
+}
 
+// splitByFuncSpans turns a file diff into one Unit per touched function (by the
+// given spans) plus a residual file Unit for changes outside any function. It is
+// the language-agnostic core shared by GoFuncSplitter (spans from go/ast) and
+// IndexSplitter (spans from a func-index). Falls back to a single file Unit when
+// nothing is attributed (e.g. all hunks are pure deletions past EOF).
+func splitByFuncSpans(d model.Diff, spans []funcSpan) []Unit {
 	header := diffHeader(d.Diff)
 	hunks := diff.ParseHunks(d.Diff)
 
@@ -48,19 +58,18 @@ func (GoFuncSplitter) Split(d model.Diff) ([]Unit, error) {
 	}
 
 	var units []Unit
-	// Func units, in source order so output is stable.
+	// Func units, in span order so output is stable.
 	for i := range spans {
 		hs := grouped[i]
 		if len(hs) == 0 {
 			continue
 		}
-		id := FuncID(d.NewPath, spans[i].recv, spans[i].name)
 		ins, del := countChanges(hs)
 		units = append(units, Unit{
-			ID:         id,
+			ID:         spans[i].id,
 			Scope:      ScopeFunc,
 			Path:       d.NewPath,
-			Symbols:    []string{id},
+			Symbols:    []string{spans[i].id},
 			Diff:       header + renderHunks(hs),
 			Insertions: ins,
 			Deletions:  del,
@@ -79,12 +88,11 @@ func (GoFuncSplitter) Split(d model.Diff) ([]Unit, error) {
 		})
 	}
 
-	// Nothing attributed (e.g. all hunks were pure deletions past EOF) — fall
-	// back rather than emit an empty review.
 	if len(units) == 0 {
-		return FileSplitter{}.Split(d)
+		fu, _ := FileSplitter{}.Split(d)
+		return fu
 	}
-	return units, nil
+	return units
 }
 
 // parseGoFuncs returns the line spans of every top-level func/method declaration.
@@ -103,8 +111,7 @@ func parseGoFuncs(path, src string) ([]funcSpan, error) {
 		spans = append(spans, funcSpan{
 			start: fset.Position(fd.Pos()).Line,
 			end:   fset.Position(fd.End()).Line,
-			recv:  recvTypeName(fd),
-			name:  fd.Name.Name,
+			id:    FuncID(path, recvTypeName(fd), fd.Name.Name),
 		})
 	}
 	return spans, nil
