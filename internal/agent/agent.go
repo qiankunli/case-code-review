@@ -155,8 +155,9 @@ func New(args Args) *Agent {
 	a := &Agent{
 		args:    args,
 		session: args.Session,
-		// file is the degenerate unit; finer splitters are swapped in here.
-		splitter: unit.FileSplitter{},
+		// GoFuncSplitter cuts Go files to function-level Units and degrades to
+		// file scope for everything else / unparseable sources.
+		splitter: unit.GoFuncSplitter{},
 	}
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
@@ -332,10 +333,9 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 		return nil, fmt.Errorf("all diffs filtered out by token size")
 	}
 
-	// Split each surviving (non-deleted) file diff into review Units. With the
-	// default FileSplitter this yields one Unit per file, so dispatch below is
-	// behaviour-identical to the previous per-file loop; finer splitters simply
-	// produce more, smaller Units that the same machinery fans out over.
+	// Split each surviving (non-deleted) file diff into review Units (function-
+	// level for Go, file-level otherwise / when coarsened by the cost governor).
+	// The fan-out machinery below is granularity-agnostic.
 	units, err := a.splitUnits()
 	if err != nil {
 		return nil, err
@@ -396,13 +396,62 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 		return nil, fmt.Errorf("all %d unit review(s) failed — check your LLM configuration and API key", dispatched)
 	}
 
+	// Review-filter runs per FILE, after every Unit of that file has finished:
+	// comments resolve to file:line and the collector is path-keyed, so a
+	// per-Unit filter would judge sibling Units' comments against only this
+	// Unit's diff slice. File-level filtering sees the whole file diff + all its
+	// comments at once.
+	a.runReviewFilters(ctx)
+
 	return a.args.CommentCollector.Comments(), nil
 }
 
+// runReviewFilters runs the REVIEW_FILTER_TASK once per changed file, after all
+// Units have produced their comments. File-level (not per-Unit) by design — see
+// the call site in dispatchUnits.
+func (a *Agent) runReviewFilters(ctx context.Context) {
+	if ft := a.args.Template.ReviewFilterTask; ft == nil || len(ft.Messages) == 0 {
+		return
+	}
+	concurrency := a.args.MaxConcurrency
+	if concurrency <= 0 {
+		concurrency = 8
+	}
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	for i := range a.diffs {
+		if a.diffs[i].IsDeleted {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(d model.Diff) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			a.executeReviewFilter(ctx, d)
+		}(a.diffs[i])
+	}
+	wg.Wait()
+}
+
+// defaultUnitWatermark is the high-water mark on review Units (≈ LLM loops) for
+// one review: once the total rises above it, the cost governor coarsens
+// granularity to bring the loop count back down.
+const defaultUnitWatermark = 10
+
 // splitUnits runs the configured Splitter over each non-deleted file diff and
-// flattens the result. Deleted files are not reviewed and are skipped here.
+// applies the cost governor (§2.5): when the total Unit count exceeds the
+// budget, files that split into more than one Unit are coarsened back to a
+// single file Unit — trading per-function focus for fewer review loops. Spec
+// context (when present) rides whatever granularity survives; the governor caps
+// loop count, it does not drop context. Deleted files are skipped.
 func (a *Agent) splitUnits() ([]unit.Unit, error) {
-	var units []unit.Unit
+	type group struct {
+		d     model.Diff
+		units []unit.Unit
+	}
+	var groups []group
+	total := 0
 	for i := range a.diffs {
 		if a.diffs[i].IsDeleted {
 			continue
@@ -411,7 +460,20 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 		if err != nil {
 			return nil, fmt.Errorf("split units for %s: %w", a.diffs[i].NewPath, err)
 		}
-		units = append(units, us...)
+		groups = append(groups, group{a.diffs[i], us})
+		total += len(us)
+	}
+
+	coarsen := total > defaultUnitWatermark
+	var units []unit.Unit
+	for _, g := range groups {
+		if coarsen && len(g.units) > 1 {
+			// Coalesce this file's functions into one file Unit (fewer loops),
+			// retaining their func ids so spec/case still resolves for it.
+			units = append(units, unit.CoalesceFile(g.d, g.units))
+			continue
+		}
+		units = append(units, g.units...)
 	}
 	return units, nil
 }
@@ -501,28 +563,21 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		return nil
 	}
 
-	err := a.runner.RunPerFile(ctx, messages, newPath)
-	if err == nil {
-		// REVIEW_FILTER_TASK runs after the main loop and decides which of the
-		// just-collected comments to drop. It needs to see comments produced by
-		// the async CommentWorkerPool, so wait for that to drain first.
-		if a.args.CommentWorkerPool != nil {
-			a.args.CommentWorkerPool.Await()
-		}
-		a.executeReviewFilter(ctx, u)
-	}
-	return err
+	// REVIEW_FILTER_TASK is NOT run here: it is a file-level post-pass
+	// (runReviewFilters), so sibling Units of the same file don't filter each
+	// other's comments against the wrong diff slice.
+	return a.runner.RunPerFile(ctx, messages, newPath)
 }
 
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
 // provably incorrect based solely on the diff. Errors are logged and silently ignored.
-func (a *Agent) executeReviewFilter(ctx context.Context, u unit.Unit) {
+func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff) {
 	ft := a.args.Template.ReviewFilterTask
 	if ft == nil || len(ft.Messages) == 0 {
 		return
 	}
 
-	newPath := u.Path
+	newPath := d.NewPath
 	comments := a.args.CommentCollector.CommentsForPath(newPath)
 	if len(comments) == 0 {
 		return
@@ -534,7 +589,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, u unit.Unit) {
 	for _, m := range ft.Messages {
 		content := m.Content
 		content = strings.ReplaceAll(content, "{{path}}", newPath)
-		content = strings.ReplaceAll(content, "{{diff}}", u.Diff)
+		content = strings.ReplaceAll(content, "{{diff}}", d.Diff)
 		content = strings.ReplaceAll(content, "{{comments}}", commentsJSON)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}

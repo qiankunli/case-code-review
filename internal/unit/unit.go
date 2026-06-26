@@ -33,9 +33,12 @@ type Unit struct {
 	// Path is the owning file path — the identity used for comment placement
 	// and diff/line resolution. Never empty.
 	Path string
-	// Symbol is the enclosing function id for function scope (empty for file
-	// scope). It is the join key into spec.json for spec/case association.
-	Symbol string
+	// Symbols are the function ids this Unit covers — the join keys into
+	// spec.json for spec/case association. A function Unit covers one (itself);
+	// a file Unit coalesced from several functions by the cost governor covers
+	// all of them, so spec/case still resolves after coarsening; a degenerate
+	// file Unit (non-Go / unparseable) covers none.
+	Symbols []string
 	// Diff is the diff slice this Unit reviews: the whole-file diff for file
 	// scope, or just the function's hunks for function scope.
 	Diff string
@@ -67,4 +70,17 @@ func (FileSplitter) Split(d model.Diff) ([]Unit, error) {
 		Insertions: d.Insertions,
 		Deletions:  d.Deletions,
 	}}, nil
+}
+
+// CoalesceFile merges a file's review Units into a single file-scope Unit. The
+// cost governor uses it to trade per-function focus for fewer review loops: the
+// merged Unit reviews the whole file diff but retains every member's Symbols, so
+// spec/case still resolves for it (the governor caps loop count, not context).
+func CoalesceFile(d model.Diff, members []Unit) Unit {
+	u, _ := FileSplitter{}.Split(d)
+	merged := u[0]
+	for _, m := range members {
+		merged.Symbols = append(merged.Symbols, m.Symbols...)
+	}
+	return merged
 }
