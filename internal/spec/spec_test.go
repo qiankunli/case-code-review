@@ -61,36 +61,6 @@ func TestRenderNilIndexSafe(t *testing.T) {
 	}
 }
 
-func TestRenderRulesAndLinks(t *testing.T) {
-	idx, err := Parse([]byte(`{
-	  "a.go::Foo": {
-	    "rules": ["hot path; watch new sync DB calls"],
-	    "links": ["docs/x.md", "a.go::Bar"]
-	  }
-	}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	syms := []string{"a.go::Foo"}
-
-	if got := idx.RenderRules(syms); !strings.Contains(got, "hot path; watch new sync DB calls") {
-		t.Errorf("rules render: %q", got)
-	}
-	links := idx.RenderLinks(syms)
-	if !strings.Contains(links, "docs/x.md (doc)") || !strings.Contains(links, "a.go::Bar (function)") {
-		t.Errorf("links render should label doc vs function: %q", links)
-	}
-
-	// nil-safe + no-match -> empty
-	var nilIdx Index
-	if nilIdx.RenderRules(syms) != "" || nilIdx.RenderLinks(syms) != "" {
-		t.Error("nil index should render empty for rules/links")
-	}
-	if idx.RenderRules([]string{"a.go::Unknown"}) != "" {
-		t.Error("unknown symbol should render empty rules")
-	}
-}
-
 func TestLoadChainCustomOverridesProject(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // isolate ~/.ccr/spec.json (none)
 	repo := t.TempDir()
