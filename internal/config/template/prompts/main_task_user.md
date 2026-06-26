@@ -19,6 +19,10 @@ Current time in the real world: {{current_system_date_time}}
 The contract and cases bound to the changed function(s). Treat them as invariants the change must preserve: for each, judge whether this diff could break it. A case unrelated to this change is a valid finding too — say it is unaffected. If empty, no spec is bound to these functions.
 {{spec_cases}}
 
+### See Also (Optional)
+References the author flagged as relevant when changing these function(s) — consult them, fetching content as needed (a bare path is a doc; `<path>::<symbol>` is another function). If empty, none were flagged.
+{{see_also}}
+
 ### Review Checklist
 {{system_rule}}
 
