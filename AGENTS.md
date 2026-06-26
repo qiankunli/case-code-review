@@ -15,9 +15,9 @@
 case-code-review/
 ├── cmd/ccr/        CLI 入口：review/scan/config/… 子命令；组装 Args、加载 spec.json
 └── internal/
-    ├── unit/       ★ Unit 两阶段——Splitter→diff unit（AutoSplitter：Go go/ast、Python python3）；Merger→review unit（WatermarkMerger 归并）
-    ├── spec/       ★ 消费 spec.json（spec/case/rule/link）→ 渲染评审上下文
-    ├── agent/      ★ 评审编排：split→merge→每 review unit 一个 loop；注入上下文；file 级 review-filter
+    ├── unit/       ★ Unit 两阶段（Splitter→diff unit：Go go/ast、Python python3；Merger→review unit：WatermarkMerger 归并）+ context 抽象 Clue / ClueFinder / Unit.Clues
+    ├── spec/       ★ 消费 spec.json：SpecFinder/RuleFinder/LinkFinder 把 spec/case/rule/link 找成 Clue
+    ├── agent/      ★ 评审编排：split→ClueFinder 找 Clue→merge→每 review unit 一个 loop；按 Clue 渲染上下文；file 级 review-filter
     ├── diff/       diff/hunk 解析、评论行号解析
     ├── llmloop/    agentic 评审 loop（复用 ocr 引擎）
     ├── config/     模板 prompt、rule.json、tools 配置
@@ -27,10 +27,12 @@ case-code-review/
 **主链路**：
 
 ```
-diff ─Splitter─▶ diff unit ─抓上下文(caller/callee + spec-case 的 spec/case/rule/link)─▶ Merger ─▶ review unit ─▶ review loop
+diff ─Splitter─▶ diff unit ─ClueFinder 找 Clue(spec/rule/link；caller/callee 待加)─▶ Merger(并 Clue) ─▶ review unit ─▶ review loop
 ```
 
-> 即：从 diff 切出 diff unit → 为每个 diff unit 沿 caller/callee 抓上下文、并挂上它在 spec-case 里的 spec/case/rule/link → 归并成 review unit → 一个 review unit 一个 review loop。（caller/callee 抓取是路线图上的重件，依赖 call-graph。）
+> 即：从 diff 切出 diff unit → 各 ClueFinder 为它找 Clue（挂到 `Unit.Clues`：spec/case/rule/link 已接；caller/callee 待加，依赖 call-graph）→ 归并成 review unit（成员 Clue 取并集）→ 一个 review unit 一个 review loop。
+>
+> **Clue / ClueFinder**：context 抽象的三件——找的动作（`ClueFinder.Find(u) []Clue`）、找的结果（`Clue{Kind, Text, Ref}`，Text 内联 / Ref 按需指针）、挂哪（`Unit.Clues`）。加 caller/callee 只是再加 ClueFinder，主链路不动。
 
 ## 关键约定（核心四条）
 
