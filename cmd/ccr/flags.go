@@ -105,7 +105,7 @@ type reviewOptions struct {
 	outputFormat   string
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
-	specJSON       string // --spec-json: path to spec.json (specgen output) for contract-checklist injection
+	specPath       string // --spec: path to spec.json (specgen output); also auto-loaded from .ccr/spec.json
 	model          string // --model: override resolved LLM model for this review
 	concurrency    int
 	perFileTimeout int
@@ -132,7 +132,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
 	a.StringVar(&opts.audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
 	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the review")
-	a.StringVar(&opts.specJSON, "spec-json", "", "path to spec.json (specgen output); injects each changed function's spec/case as a contract checklist")
+	a.StringVar(&opts.specPath, "spec", "", "path to spec.json (specgen output); also auto-loaded from .ccr/spec.json — injects each changed function's spec/case as a contract checklist")
 	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-6)")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")

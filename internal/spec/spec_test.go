@@ -1,6 +1,8 @@
 package spec
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -56,5 +58,54 @@ func TestRenderNilIndexSafe(t *testing.T) {
 	var idx Index // nil
 	if got := idx.Render([]string{"any::Symbol"}); got != "" {
 		t.Errorf("nil index should render empty, got %q", got)
+	}
+}
+
+func TestLoadChainCustomOverridesProject(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate ~/.ccr/spec.json (none)
+	repo := t.TempDir()
+	mustWrite(t, filepath.Join(repo, ".ccr", "spec.json"), `{
+	  "a.go::Foo": {"spec": "project-foo"},
+	  "a.go::Bar": {"spec": "project-bar"}
+	}`)
+	custom := filepath.Join(t.TempDir(), "custom.json")
+	mustWrite(t, custom, `{
+	  "a.go::Foo": {"spec": "custom-foo"},
+	  "a.go::Baz": {"spec": "custom-baz"}
+	}`)
+
+	idx, err := Load(repo, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx["a.go::Foo"].Spec != "custom-foo" {
+		t.Errorf("custom should override project: got %q", idx["a.go::Foo"].Spec)
+	}
+	if idx["a.go::Bar"].Spec != "project-bar" {
+		t.Errorf("project-only entry should survive: got %q", idx["a.go::Bar"].Spec)
+	}
+	if idx["a.go::Baz"].Spec != "custom-baz" {
+		t.Errorf("custom-only entry missing")
+	}
+}
+
+func TestLoadNoLayersReturnsNil(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	idx, err := Load(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx != nil {
+		t.Errorf("no layers should return nil, got %v", idx)
+	}
+}
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
