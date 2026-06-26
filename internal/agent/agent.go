@@ -21,6 +21,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/stdout"
 	"github.com/qiankunli/case-code-review/internal/telemetry"
 	"github.com/qiankunli/case-code-review/internal/tool"
+	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
 // AgentWarning is re-exported from llmloop for backwards compatibility with
@@ -122,8 +123,12 @@ type Agent struct {
 	totalDeletions  int64
 	currentDate     string
 	session         *session.SessionHistory
-	subtaskFailed   int64 // count of failed subtasks, accessed atomically
+	unitFailed      int64 // count of failed unit reviews, accessed atomically
 	runner          *llmloop.Runner
+	// splitter turns each changed file's diff into one or more review Units.
+	// Set in New(); file is the degenerate unit (FileSplitter), finer
+	// splitters are swapped in for function-level review.
+	splitter unit.Splitter
 }
 
 // New creates a new Agent from the given arguments.
@@ -150,6 +155,8 @@ func New(args Args) *Agent {
 	a := &Agent{
 		args:    args,
 		session: args.Session,
+		// file is the degenerate unit; finer splitters are swapped in here.
+		splitter: unit.FileSplitter{},
 	}
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
@@ -208,8 +215,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// Record file count metric.
 	telemetry.RecordFilesReviewed(ctx, int64(reviewCount))
 
-	// Step 2: Dispatch per-file subtasks concurrently
-	comments, err := a.dispatchSubtasks(ctx)
+	// Step 2: Dispatch per-unit reviews concurrently
+	comments, err := a.dispatchUnits(ctx)
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
 	}
@@ -312,8 +319,8 @@ func (a *Agent) injectDiffMap() {
 	}
 }
 
-// dispatchSubtasks runs the Plan + Main phases for each changed file concurrently.
-func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error) {
+// dispatchUnits runs the Plan + Main phases for each review Unit concurrently.
+func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 	startTime := time.Now()
 	defer func() {
 		telemetry.RecordReviewDuration(ctx, time.Since(startTime))
@@ -323,6 +330,15 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	a.diffs = a.filterLargeDiffs(a.diffs)
 	if len(a.diffs) == 0 {
 		return nil, fmt.Errorf("all diffs filtered out by token size")
+	}
+
+	// Split each surviving (non-deleted) file diff into review Units. With the
+	// default FileSplitter this yields one Unit per file, so dispatch below is
+	// behaviour-identical to the previous per-file loop; finer splitters simply
+	// produce more, smaller Units that the same machinery fans out over.
+	units, err := a.splitUnits()
+	if err != nil {
+		return nil, err
 	}
 
 	var wg sync.WaitGroup
@@ -336,15 +352,12 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
 
 	var dispatched int64
-	for i := range a.diffs {
-		if a.diffs[i].IsDeleted {
-			continue
-		}
+	for i := range units {
 		dispatched++
 		wg.Add(1)
 		sem <- struct{}{} // acquire semaphore
 
-		go func(d model.Diff) {
+		go func(u unit.Unit) {
 			defer wg.Done()
 			defer func() { <-sem }() // release
 
@@ -357,14 +370,14 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 				fileCtx = ctx
 			}
 
-			if err := a.executeSubtask(fileCtx, d); err != nil {
-				atomic.AddInt64(&a.subtaskFailed, 1)
-				fmt.Fprintf(stdout.Writer(), "[ccr] Subtask error for %s: %v\n", d.NewPath, err)
-				telemetry.ErrorEvent(fileCtx, "subtask.error", err,
-					telemetry.AnyToAttr("file.path", d.NewPath))
-				a.recordWarning("subtask_error", d.NewPath, err.Error())
+			if err := a.reviewUnit(fileCtx, u); err != nil {
+				atomic.AddInt64(&a.unitFailed, 1)
+				fmt.Fprintf(stdout.Writer(), "[ccr] Unit review error for %s: %v\n", u.ID, err)
+				telemetry.ErrorEvent(fileCtx, "unit.error", err,
+					telemetry.AnyToAttr("file.path", u.Path))
+				a.recordWarning("unit_error", u.Path, err.Error())
 			}
-		}(a.diffs[i])
+		}(units[i])
 	}
 
 	wg.Wait()
@@ -378,28 +391,45 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		a.args.CommentWorkerPool.Await()
 	}
 
-	failed := atomic.LoadInt64(&a.subtaskFailed)
+	failed := atomic.LoadInt64(&a.unitFailed)
 	if failed > 0 && failed == dispatched {
-		return nil, fmt.Errorf("all %d file review(s) failed — check your LLM configuration and API key", dispatched)
+		return nil, fmt.Errorf("all %d unit review(s) failed — check your LLM configuration and API key", dispatched)
 	}
 
 	return a.args.CommentCollector.Comments(), nil
 }
 
-// executeSubtask performs the Plan Phase + Main Loop for a single file.
-func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
-	ctx, span := telemetry.StartSpan(ctx, "subtask.execute."+d.NewPath)
+// splitUnits runs the configured Splitter over each non-deleted file diff and
+// flattens the result. Deleted files are not reviewed and are skipped here.
+func (a *Agent) splitUnits() ([]unit.Unit, error) {
+	var units []unit.Unit
+	for i := range a.diffs {
+		if a.diffs[i].IsDeleted {
+			continue
+		}
+		us, err := a.splitter.Split(a.diffs[i])
+		if err != nil {
+			return nil, fmt.Errorf("split units for %s: %w", a.diffs[i].NewPath, err)
+		}
+		units = append(units, us...)
+	}
+	return units, nil
+}
+
+// reviewUnit performs the Plan Phase + Main Loop for a single review Unit.
+func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
+	ctx, span := telemetry.StartSpan(ctx, "unit.review."+u.ID)
 	defer span.End()
-	telemetry.SetAttr(span, "file.path", d.NewPath)
-	telemetry.SetAttr(span, "lines.changed", d.Insertions+d.Deletions)
-	telemetry.SetAttr(span, "lines.inserted", d.Insertions)
-	telemetry.SetAttr(span, "lines.deleted", d.Deletions)
+	telemetry.SetAttr(span, "file.path", u.Path)
+	telemetry.SetAttr(span, "lines.changed", u.Insertions+u.Deletions)
+	telemetry.SetAttr(span, "lines.inserted", u.Insertions)
+	telemetry.SetAttr(span, "lines.deleted", u.Deletions)
 
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
-	newPath := d.NewPath
+	newPath := u.Path
 
 	// Build change-files list excluding current file
 	changeFilesExcludingCurrent := a.buildChangeFilesExcept(newPath)
@@ -407,7 +437,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 	rule := a.resolveSystemRule(strings.ToLower(newPath))
 
 	threshold := a.args.Template.PlanModeLineThreshold
-	changeLines := d.Insertions + d.Deletions
+	changeLines := u.Insertions + u.Deletions
 
 	// Phase 1: Plan (skip when changes are below threshold)
 	var planResult string
@@ -419,7 +449,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 			telemetry.AnyToAttr("threshold", threshold))
 	} else if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 {
 		var err error
-		planResult, err = a.executePlanPhase(ctx, newPath, d.Diff, changeFilesExcludingCurrent, rule)
+		planResult, err = a.executePlanPhase(ctx, newPath, u.Diff, changeFilesExcludingCurrent, rule)
 		if err != nil {
 			fmt.Fprintf(stdout.Writer(), "[ccr] Plan phase failed for %s: %v (continuing without plan)\n", newPath, err)
 			telemetry.Eventf(ctx, "plan.failed", err.Error(),
@@ -441,7 +471,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 		content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
 		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
 		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
-		content = strings.ReplaceAll(content, "{{diff}}", d.Diff)
+		content = strings.ReplaceAll(content, "{{diff}}", u.Diff)
 		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no
@@ -479,19 +509,20 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 		if a.args.CommentWorkerPool != nil {
 			a.args.CommentWorkerPool.Await()
 		}
-		a.executeReviewFilter(ctx, d, newPath)
+		a.executeReviewFilter(ctx, u)
 	}
 	return err
 }
 
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
 // provably incorrect based solely on the diff. Errors are logged and silently ignored.
-func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath string) {
+func (a *Agent) executeReviewFilter(ctx context.Context, u unit.Unit) {
 	ft := a.args.Template.ReviewFilterTask
 	if ft == nil || len(ft.Messages) == 0 {
 		return
 	}
 
+	newPath := u.Path
 	comments := a.args.CommentCollector.CommentsForPath(newPath)
 	if len(comments) == 0 {
 		return
@@ -503,7 +534,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	for _, m := range ft.Messages {
 		content := m.Content
 		content = strings.ReplaceAll(content, "{{path}}", newPath)
-		content = strings.ReplaceAll(content, "{{diff}}", d.Diff)
+		content = strings.ReplaceAll(content, "{{diff}}", u.Diff)
 		content = strings.ReplaceAll(content, "{{comments}}", commentsJSON)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
