@@ -161,9 +161,9 @@ func New(args Args) *Agent {
 	a := &Agent{
 		args:    args,
 		session: args.Session,
-		// GoFuncSplitter cuts Go files to function-level Units and degrades to
-		// file scope for everything else / unparseable sources.
-		splitter: unit.GoFuncSplitter{},
+		// AutoSplitter cuts each file to function-level Units by language (Go via
+		// go/ast, Python via python3) and degrades to file scope otherwise.
+		splitter: unit.AutoSplitter{},
 	}
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
