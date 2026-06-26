@@ -28,8 +28,10 @@ type Case struct {
 
 // Entry is the spec + cases bound to one code symbol.
 type Entry struct {
-	Spec  string `json:"spec,omitempty"`
-	Cases []Case `json:"cases,omitempty"`
+	Spec  string   `json:"spec,omitempty"`
+	Cases []Case   `json:"cases,omitempty"`
+	Links []string `json:"links,omitempty"`
+	Rules []string `json:"rules,omitempty"`
 }
 
 // Index is spec.json: unit-id (<relpath>::<symbol>) -> Entry.
@@ -136,6 +138,36 @@ func (idx Index) Render(symbols []string) string {
 				b.WriteString(" [forbid: " + c.Forbid + "]")
 			}
 			b.WriteByte('\n')
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// RenderRules returns the function-level review criteria (@rule) for the symbols,
+// or "". The reviewer should watch for these when reviewing the change. Safe on
+// a nil Index.
+func (idx Index) RenderRules(symbols []string) string {
+	var b strings.Builder
+	for _, sym := range symbols {
+		for _, r := range idx[sym].Rules {
+			b.WriteString("- " + r + "\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// RenderLinks returns the author-curated see-also pointers (@link) for the
+// symbols, or "". Each is labelled doc/function so the reviewer knows what to
+// fetch on demand. Safe on a nil Index.
+func (idx Index) RenderLinks(symbols []string) string {
+	var b strings.Builder
+	for _, sym := range symbols {
+		for _, l := range idx[sym].Links {
+			kind := "doc"
+			if strings.Contains(l, "::") {
+				kind = "function"
+			}
+			fmt.Fprintf(&b, "- %s (%s)\n", l, kind)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

@@ -503,6 +503,14 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	changeFilesExcludingCurrent := a.buildChangeFilesExcept(newPath)
 
 	rule := a.resolveSystemRule(strings.ToLower(newPath))
+	// RuleBuilder: per-function @rule (from spec.json) augments the path-glob
+	// rule.json criteria. Both flow into {{system_rule}} (plan + main).
+	if specRules := a.args.SpecIndex.RenderRules(u.Symbols); specRules != "" {
+		if rule != "" {
+			rule += "\n"
+		}
+		rule += specRules
+	}
 
 	threshold := a.args.Template.PlanModeLineThreshold
 	changeLines := u.Insertions + u.Deletions
@@ -542,6 +550,8 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		content = strings.ReplaceAll(content, "{{diff}}", u.Diff)
 		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
 		content = strings.ReplaceAll(content, "{{spec_cases}}", a.args.SpecIndex.Render(u.Symbols))
+		// LinkBuilder: curated see-also pointers; the reviewer fetches content on demand.
+		content = strings.ReplaceAll(content, "{{see_also}}", a.args.SpecIndex.RenderLinks(u.Symbols))
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no
 		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
