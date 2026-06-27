@@ -1,28 +1,18 @@
-// Package callgraph supplies call-graph-derived review context. Today it holds
-// CallerFinder, the ClueFinder that recovers a changed function's GOVERNING spec
-// by walking one hop up to its callers. It is deliberately lightweight (git grep
-// + go/ast, no whole-repo type checking) so it works on a diff that may not even
-// compile, and degrades to nothing whenever it can't help.
+// Package callgraph supplies call-graph-derived review context via two
+// ClueFinders: CallerFinder recovers a changed function's GOVERNING spec by
+// walking one hop up to its callers; CalleeFinder surfaces the contracts the
+// function DEPENDS ON by looking one hop down to its callees. Both are
+// deliberately lightweight (git grep + go/ast, no whole-repo type checking) so
+// they work on a diff that may not even compile, and degrade to nothing whenever
+// they can't help.
 package callgraph
 
 import (
-	"bytes"
-	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/qiankunli/case-code-review/internal/gitcmd"
 	"github.com/qiankunli/case-code-review/internal/spec"
 	"github.com/qiankunli/case-code-review/internal/unit"
-)
-
-const (
-	defaultMaxCallers = 8
-	grepTimeout       = 10 * time.Second
 )
 
 // CallerFinder supplies a changed function's governing spec when the function
@@ -55,7 +45,7 @@ func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
 
 	max := f.Max
 	if max <= 0 {
-		max = defaultMaxCallers
+		max = defaultMaxResults
 	}
 	self := map[string]bool{}
 	for _, sym := range u.Symbols {
@@ -69,8 +59,9 @@ func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
 		if name == "" {
 			continue
 		}
-		for _, h := range f.grepCallers(name, max) {
-			id, ok := f.callerID(h)
+		// Word-match the called name; resolution + dedup narrows to Max, so over-fetch.
+		for _, h := range grepGo(f.RepoDir, f.Runner, []string{"-w", "-e", name}, max*4) {
+			id, ok := funcIDAt(f.RepoDir, h)
 			if !ok || self[id] || emitted[id] { // skip the definition / recursion / dupes
 				continue
 			}
@@ -103,66 +94,4 @@ func funcName(unitID string) string {
 		return symbol[i+1:]
 	}
 	return symbol
-}
-
-type hit struct {
-	file string
-	line int
-}
-
-// grepCallers word-matches the name across the repo's Go files. It over-fetches
-// (resolution + dedup narrows to Max) and returns nil on any error so the finder
-// degrades silently.
-func (f CallerFinder) grepCallers(name string, max int) []hit {
-	ctx, cancel := context.WithTimeout(context.Background(), grepTimeout)
-	defer cancel()
-
-	args := []string{"--no-pager", "grep", "-n", "-w", "--no-color", "-e", name, "--", "*.go"}
-	out, err := f.gitOutput(ctx, args)
-	if err != nil {
-		return nil
-	}
-	var hits []hit
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, ":", 3) // file:line:content
-		if len(parts) < 3 {
-			continue
-		}
-		n, err := strconv.Atoi(parts[1])
-		if err != nil {
-			continue
-		}
-		hits = append(hits, hit{file: parts[0], line: n})
-		if len(hits) >= max*4 {
-			break
-		}
-	}
-	return hits
-}
-
-func (f CallerFinder) gitOutput(ctx context.Context, args []string) ([]byte, error) {
-	if f.Runner != nil {
-		out, err := f.Runner.Output(ctx, f.RepoDir, args...)
-		return out, err
-	}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = f.RepoDir
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
-}
-
-// callerID reads the hit's file and resolves the line to its enclosing function.
-func (f CallerFinder) callerID(h hit) (string, bool) {
-	src, err := os.ReadFile(filepath.Join(f.RepoDir, h.file))
-	if err != nil {
-		return "", false
-	}
-	return unit.GoFuncIDAt(h.file, string(src), h.line)
 }
