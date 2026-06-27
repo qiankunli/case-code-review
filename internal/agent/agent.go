@@ -183,6 +183,7 @@ func New(args Args) *Agent {
 		// governing spec. (callee finder joins here later.)
 		costlyFinders: []unit.ClueFinder{
 			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.SpecIndex, Runner: args.GitRunner},
+			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.SpecIndex, Runner: args.GitRunner},
 		},
 	}
 	// DiffLookup closure captures a so the runner can resolve per-file
@@ -528,9 +529,10 @@ func renderClues(clues []unit.Clue) (specCases, rules, seeAlso string) {
 	var specBlocks, ruleLines, linkLines []string
 	for _, c := range clues {
 		switch c.Kind {
-		case unit.ClueSpec, unit.ClueCaller:
-			// A caller's spec (inherited when the function has none of its own)
-			// is still a contract the change must preserve.
+		case unit.ClueSpec, unit.ClueCaller, unit.ClueCallee:
+			// All three are contracts the change must respect: the function's own
+			// spec, the caller's governing spec (inherited when it has none), and
+			// the callees' contracts the change depends on.
 			specBlocks = append(specBlocks, c.Text)
 		case unit.ClueRule:
 			ruleLines = append(ruleLines, "- "+c.Text)
