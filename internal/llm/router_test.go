@@ -134,7 +134,7 @@ func TestNewLLMRouter_SinglePoolNoRouter(t *testing.T) {
 }
 
 func TestResolveModels_Chain(t *testing.T) {
-	for _, k := range []string{"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"} {
+	for _, k := range []string{"CCR_LLM_URL", "CCR_LLM_TOKEN", "CCR_LLM_MODEL", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"} {
 		t.Setenv(k, "")
 	}
 	cfg := configFile{
@@ -190,7 +190,7 @@ func TestLLMRouter_StampsAliasOnResponse(t *testing.T) {
 }
 
 func TestResolveModels_RejectsUnknownPolicy(t *testing.T) {
-	for _, k := range []string{"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"} {
+	for _, k := range []string{"CCR_LLM_URL", "CCR_LLM_TOKEN", "CCR_LLM_MODEL", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"} {
 		t.Setenv(k, "")
 	}
 	cfg := configFile{
@@ -234,7 +234,7 @@ func TestLLMRouter_RoundRobinSpreadsLoad(t *testing.T) {
 }
 
 func TestResolveModels_AcceptsRoundRobin(t *testing.T) {
-	for _, k := range []string{"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"} {
+	for _, k := range []string{"CCR_LLM_URL", "CCR_LLM_TOKEN", "CCR_LLM_MODEL", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"} {
 		t.Setenv(k, "")
 	}
 	cfg := configFile{

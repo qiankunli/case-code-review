@@ -17,7 +17,7 @@ const (
 
 // Config holds resolved telemetry configuration.
 type Config struct {
-	Enabled      bool   // Master switch; false when OCR_ENABLE_TELEMETRY is unset
+	Enabled      bool   // Master switch; false when CCR_ENABLE_TELEMETRY is unset
 	ServiceName  string // Service name in traces/metrics
 	Exporter     string // "console" or "otlp"
 	OTLPEndpoint string // OTLP collector address (grpc/http)
@@ -40,7 +40,7 @@ func DefaultConfig() Config {
 // resolveEnv reads environment variables to override defaults.
 // Environment takes highest priority.
 func resolveEnv(cfg *Config) {
-	if os.Getenv("OCR_ENABLE_TELEMETRY") == "1" {
+	if os.Getenv("CCR_ENABLE_TELEMETRY") == "1" {
 		cfg.Enabled = true
 	}
 	if v := os.Getenv("OTEL_SERVICE_NAME"); v != "" {
@@ -53,7 +53,7 @@ func resolveEnv(cfg *Config) {
 	if v := os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"); v != "" {
 		cfg.OTLPProtocol = v
 	}
-	if os.Getenv("OCR_CONTENT_LOGGING") == "1" {
+	if os.Getenv("CCR_CONTENT_LOGGING") == "1" {
 		cfg.ContentLog = true
 	}
 }

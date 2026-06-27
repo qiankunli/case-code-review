@@ -24,11 +24,11 @@ type ResolvedEndpoint struct {
 
 // Environment variable names for OCR-specific configuration.
 const (
-	envOCRLLMURL        = "OCR_LLM_URL"
-	envOCRLLMToken      = "OCR_LLM_TOKEN"
-	envOCRLLMModel      = "OCR_LLM_MODEL"
-	envOCRLLMAuthHeader = "OCR_LLM_AUTH_HEADER"
-	envOCRUseAnthropic  = "OCR_USE_ANTHROPIC"
+	envCCRLLMURL        = "CCR_LLM_URL"
+	envCCRLLMToken      = "CCR_LLM_TOKEN"
+	envCCRLLMModel      = "CCR_LLM_MODEL"
+	envCCRLLMAuthHeader = "CCR_LLM_AUTH_HEADER"
+	envCCRUseAnthropic  = "CCR_USE_ANTHROPIC"
 )
 
 // Environment variable names from Claude Code configuration.
@@ -75,14 +75,14 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 		}
 	}
 
-	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.casecodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
+	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of CCR_LLM_URL/CCR_LLM_TOKEN/CCR_LLM_MODEL, ~/.casecodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
 }
 
 // tryOCREnv reads OCR-specific environment variables.
 func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
-	url := os.Getenv(envOCRLLMURL)
-	token := os.Getenv(envOCRLLMToken)
-	model := os.Getenv(envOCRLLMModel)
+	url := os.Getenv(envCCRLLMURL)
+	token := os.Getenv(envCCRLLMToken)
+	model := os.Getenv(envCCRLLMModel)
 	if modelOverride != "" {
 		model = modelOverride
 	}
@@ -91,7 +91,7 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	}
 
 	useAnthropic := true // default true
-	if v := os.Getenv(envOCRUseAnthropic); v != "" {
+	if v := os.Getenv(envCCRUseAnthropic); v != "" {
 		lower := strings.ToLower(v)
 		useAnthropic = lower == "true" || lower == "1" || lower == "yes"
 	}
@@ -104,7 +104,7 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	var authHeader string
 	if protocol == "anthropic" {
 		var err error
-		authHeader, err = NormalizeAuthHeader(os.Getenv(envOCRLLMAuthHeader))
+		authHeader, err = NormalizeAuthHeader(os.Getenv(envCCRLLMAuthHeader))
 		if err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", err)
 		}

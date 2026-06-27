@@ -66,7 +66,7 @@ func IsEnabled() bool {
 	return initialized && len(shutdownFuncs) > 0
 }
 
-// ContentLogging returns true when content logging is enabled via OCR_CONTENT_LOGGING.
+// ContentLogging returns true when content logging is enabled via CCR_CONTENT_LOGGING.
 func ContentLogging() bool {
 	if !IsEnabled() {
 		return false
