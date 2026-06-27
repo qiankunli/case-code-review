@@ -11,6 +11,7 @@ import (
 
 	"github.com/qiankunli/case-code-review/internal/config/rules"
 	"github.com/qiankunli/case-code-review/internal/config/template"
+	"github.com/qiankunli/case-code-review/internal/callgraph"
 	"github.com/qiankunli/case-code-review/internal/config/toolsconfig"
 	"github.com/qiankunli/case-code-review/internal/diff"
 	"github.com/qiankunli/case-code-review/internal/gitcmd"
@@ -170,12 +171,14 @@ func New(args Args) *Agent {
 		// WatermarkMerger coalesces them into review units above the watermark.
 		splitter: unit.AutoSplitter{},
 		merger:   unit.WatermarkMerger{Watermark: defaultUnitWatermark},
-		// spec.json-backed finders fill each diff unit's Clues. caller/callee
-		// finders (call-graph) will append here later.
+		// spec.json-backed finders fill each diff unit's Clues; CallerFinder adds
+		// the governing spec inherited from callers when a function has none of
+		// its own. (callee finder joins here later.)
 		finders: []unit.ClueFinder{
 			spec.SpecFinder{Index: args.SpecIndex},
 			spec.RuleFinder{Index: args.SpecIndex},
 			spec.LinkFinder{Index: args.SpecIndex},
+			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.SpecIndex, Runner: args.GitRunner},
 		},
 	}
 	// DiffLookup closure captures a so the runner can resolve per-file
@@ -506,7 +509,9 @@ func renderClues(clues []unit.Clue) (specCases, rules, seeAlso string) {
 	var specBlocks, ruleLines, linkLines []string
 	for _, c := range clues {
 		switch c.Kind {
-		case unit.ClueSpec:
+		case unit.ClueSpec, unit.ClueCaller:
+			// A caller's spec (inherited when the function has none of its own)
+			// is still a contract the change must preserve.
 			specBlocks = append(specBlocks, c.Text)
 		case unit.ClueRule:
 			ruleLines = append(ruleLines, "- "+c.Text)
