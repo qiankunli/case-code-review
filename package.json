@@ -1,0 +1,42 @@
+{
+  "name": "@qiankunli/case-code-review",
+  "version": "0.0.0",
+  "description": "case-code-review CLI — AI-powered code review tool",
+  "bin": {
+    "ccr": "bin/ccr.js"
+  },
+  "files": [
+    "bin/ccr.js",
+    "scripts/install.js",
+    "scripts/update.js",
+    "scripts/platform.js",
+    "imgs/"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/install.js",
+    "test:github-actions": "node scripts/github-actions/post-review-comments.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qiankunli/case-code-review.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "ocrConfig": {
+    "urlPattern": "https://github.com/qiankunli/case-code-review/releases/download/v{version}/casecodereview-{os}-{arch}",
+    "checksumPattern": "https://github.com/qiankunli/case-code-review/releases/download/v{version}/sha256sum.txt"
+  },
+  "optionalDependencies": {
+    "@qiankunli/ccr-darwin-arm64": "0.0.0",
+    "@qiankunli/ccr-darwin-x64": "0.0.0",
+    "@qiankunli/ccr-linux-arm64": "0.0.0",
+    "@qiankunli/ccr-linux-x64": "0.0.0",
+    "@qiankunli/ccr-win32-arm64": "0.0.0",
+    "@qiankunli/ccr-win32-x64": "0.0.0"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "license": "Apache-2.0"
+}

@@ -9,7 +9,7 @@ import (
 
 // EnvAllowedHosts is the environment variable users can set to extend the
 // default loopback allowlist with additional hostnames (comma-separated).
-const EnvAllowedHosts = "OCR_VIEWER_ALLOWED_HOSTS"
+const EnvAllowedHosts = "CCR_VIEWER_ALLOWED_HOSTS"
 
 // hostOnly returns the bare host portion of a Host header value, with any
 // port stripped and surrounding brackets removed from IPv6 literals. Empty
@@ -53,7 +53,7 @@ func isLoopbackHost(host string) bool {
 // concrete (non-wildcard) hostname or IP, it is also included so a user who
 // runs `ocr viewer --addr 192.168.1.10:5483` can still reach the UI at that
 // address. Wildcard binds (empty, 0.0.0.0, ::) are NOT auto-added — operators
-// who bind on a public interface must explicitly set OCR_VIEWER_ALLOWED_HOSTS,
+// who bind on a public interface must explicitly set CCR_VIEWER_ALLOWED_HOSTS,
 // which forces them to acknowledge the exposure.
 func buildAllowedHosts(bindHost string, envVal string) map[string]struct{} {
 	allowed := map[string]struct{}{
@@ -113,7 +113,7 @@ func splitBindHost(addr string) string {
 	return addr
 }
 
-// resolveAllowedHostsFromEnv reads the OCR_VIEWER_ALLOWED_HOSTS environment
+// resolveAllowedHostsFromEnv reads the CCR_VIEWER_ALLOWED_HOSTS environment
 // variable and combines it with the bind host to produce the active allowlist.
 func resolveAllowedHostsFromEnv(bindAddr string) map[string]struct{} {
 	return buildAllowedHosts(splitBindHost(bindAddr), os.Getenv(EnvAllowedHosts))

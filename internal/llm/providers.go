@@ -45,7 +45,7 @@ var registry = []Provider{
 	},
 	{
 		Name:        "dashscope",
-		DisplayName: "Alibaba DashScope API",
+		DisplayName: "DashScope API",
 		Protocol:    "openai",
 		BaseURL:     "https://dashscope.aliyuncs.com/compatible-mode/v1",
 		EnvVar:      "DASHSCOPE_API_KEY",
@@ -63,7 +63,7 @@ var registry = []Provider{
 	},
 	{
 		Name:        "dashscope-tokenplan",
-		DisplayName: "Alibaba DashScope Token Plan API",
+		DisplayName: "DashScope Token Plan API",
 		Protocol:    "openai",
 		BaseURL:     "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
 		EnvVar:      "DASHSCOPE_TOKENPLAN_KEY",

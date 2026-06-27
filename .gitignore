@@ -20,11 +20,11 @@ temp/
 .codegraph/
 
 # Ignore downloaded Go binary, but keep JS entry point
-!bin/ocr.js
-bin/ocr
-bin/opencodereview
+!bin/ccr.js
+bin/ccr
+bin/casecodereview
 
-/opencodereview
+/casecodereview
 
 /node_modules
 
