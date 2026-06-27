@@ -137,9 +137,11 @@ type Agent struct {
 	// triggers a review loop). Both set in New().
 	splitter unit.Splitter
 	merger   unit.Merger
-	// finders fill each diff unit's Clues (spec/rule/link context) before merge.
-	// caller/callee finders will join here once the call graph exists.
-	finders []unit.ClueFinder
+	// finders fill each diff unit's Clues before merge. Cheap finders (spec.json
+	// lookups) always run; costly ones (call-graph grep) run only when the diff
+	// is focused enough that units won't coalesce — see splitUnits.
+	finders       []unit.ClueFinder
+	costlyFinders []unit.ClueFinder
 }
 
 // New creates a new Agent from the given arguments.
@@ -171,13 +173,15 @@ func New(args Args) *Agent {
 		// WatermarkMerger coalesces them into review units above the watermark.
 		splitter: unit.AutoSplitter{},
 		merger:   unit.WatermarkMerger{Watermark: defaultUnitWatermark},
-		// spec.json-backed finders fill each diff unit's Clues; CallerFinder adds
-		// the governing spec inherited from callers when a function has none of
-		// its own. (callee finder joins here later.)
+		// Cheap, always-on: spec.json lookups by symbol.
 		finders: []unit.ClueFinder{
 			spec.SpecFinder{Index: args.SpecIndex},
 			spec.RuleFinder{Index: args.SpecIndex},
 			spec.LinkFinder{Index: args.SpecIndex},
+		},
+		// Costly, budget-gated: CallerFinder greps the repo to inherit a caller's
+		// governing spec. (callee finder joins here later.)
+		costlyFinders: []unit.ClueFinder{
 			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.SpecIndex, Runner: args.GitRunner},
 		},
 	}
@@ -469,6 +473,7 @@ const defaultUnitWatermark = 10
 func (a *Agent) splitUnits() ([]unit.Unit, error) {
 	// Stage 1 — split: each non-deleted file's diff → diff units.
 	var files []unit.FileDiffUnits
+	total := 0
 	for i := range a.diffs {
 		if a.diffs[i].IsDeleted {
 			continue
@@ -477,12 +482,20 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 		if err != nil {
 			return nil, fmt.Errorf("split units for %s: %w", a.diffs[i].NewPath, err)
 		}
-		// Stage 1.5 — find context: fill each diff unit's Clues before merge,
-		// so a coalesced file unit unions its functions' clues.
-		for j := range diffUnits {
-			diffUnits[j].Clues = a.findClues(diffUnits[j])
-		}
 		files = append(files, unit.FileDiffUnits{Diff: a.diffs[i], Units: diffUnits})
+		total += len(diffUnits)
+	}
+
+	// Stage 1.5 — find context: fill each diff unit's Clues before merge, so a
+	// coalesced file unit unions its functions' clues. Costly finders (call-graph
+	// grep) run only when units will stay fine-grained — above the watermark they
+	// coalesce to file units, where per-function caller context is both diluted
+	// and not worth one grep per changed function.
+	costly := total <= defaultUnitWatermark
+	for fi := range files {
+		for j := range files[fi].Units {
+			files[fi].Units[j].Clues = a.findClues(files[fi].Units[j], costly)
+		}
 	}
 
 	// Stage 2 — merge: diff units → review units (coalesced up the ladder when too many).
@@ -493,11 +506,17 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 	return merger.Merge(files), nil
 }
 
-// findClues runs every ClueFinder over a diff unit and concatenates the clues.
-func (a *Agent) findClues(u unit.Unit) []unit.Clue {
+// findClues runs the cheap ClueFinders over a diff unit always, and the costly
+// ones (call-graph grep) only when includeCostly is set.
+func (a *Agent) findClues(u unit.Unit, includeCostly bool) []unit.Clue {
 	var clues []unit.Clue
 	for _, f := range a.finders {
 		clues = append(clues, f.Find(u)...)
+	}
+	if includeCostly {
+		for _, f := range a.costlyFinders {
+			clues = append(clues, f.Find(u)...)
+		}
 	}
 	return clues
 }
