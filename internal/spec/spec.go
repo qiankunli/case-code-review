@@ -50,8 +50,8 @@ func Parse(data []byte) (Index, error) {
 // how review rules are loaded:
 //
 //	1. customPath (--spec)        — highest
-//	2. <repoDir>/.ccr/spec.json   — project
-//	3. ~/.ccr/spec.json           — global (lowest)
+//	2. <repoDir>/.casecodereview/spec.json   — project
+//	3. ~/.casecodereview/spec.json           — global (lowest)
 //
 // Higher layers override same-keyed (unit-id) entries. Project/global layers are
 // optional (skipped if absent); a non-empty customPath that is missing is an
@@ -62,12 +62,12 @@ func Load(repoDir, customPath string) (Index, error) {
 
 	// Load low → high so higher layers win on key collision.
 	if home, err := os.UserHomeDir(); err == nil {
-		if err := mergeOptional(merged, filepath.Join(home, ".ccr", "spec.json"), &found); err != nil {
+		if err := mergeOptional(merged, filepath.Join(home, ".casecodereview", "spec.json"), &found); err != nil {
 			return nil, err
 		}
 	}
 	if repoDir != "" {
-		if err := mergeOptional(merged, filepath.Join(repoDir, ".ccr", "spec.json"), &found); err != nil {
+		if err := mergeOptional(merged, filepath.Join(repoDir, ".casecodereview", "spec.json"), &found); err != nil {
 			return nil, err
 		}
 	}

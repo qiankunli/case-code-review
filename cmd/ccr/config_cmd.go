@@ -11,13 +11,13 @@ import (
 	"github.com/qiankunli/case-code-review/internal/llm"
 )
 
-// Default config file location: ~/.ccr/config.json
+// Default config file location: ~/.casecodereview/config.json
 func defaultConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
-	return filepath.Join(home, ".ccr", "config.json"), nil
+	return filepath.Join(home, ".casecodereview", "config.json"), nil
 }
 
 // resolveConfigPath returns OCR_CONFIG_PATH when set, otherwise the default user config path.
@@ -165,7 +165,7 @@ type ProviderEntry struct {
 	ExtraBody  map[string]any `json:"extra_body,omitempty"`
 }
 
-// Config represents the user-level configuration file (~/.ccr/config.json).
+// Config represents the user-level configuration file (~/.casecodereview/config.json).
 type Config struct {
 	Provider        string                   `json:"provider,omitempty"`
 	Model           string                   `json:"model,omitempty"`

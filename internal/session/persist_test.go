@@ -127,7 +127,7 @@ func sessionJSONLPath(t *testing.T, repoDir, sessionID string) string {
 	if err != nil {
 		t.Fatalf("home dir: %v", err)
 	}
-	return filepath.Join(home, ".ccr", "sessions", encodeRepoPath(repoDir), sessionID+".jsonl")
+	return filepath.Join(home, ".casecodereview", "sessions", encodeRepoPath(repoDir), sessionID+".jsonl")
 }
 
 func TestSetErrorIncrementsCounter(t *testing.T) {
@@ -209,7 +209,7 @@ func TestSessionFilePermissions(t *testing.T) {
 	jw.WriteSessionStart(time.Now())
 	defer jw.flushAndClose()
 
-	sessionDir := filepath.Join(tmpHome, ".ccr", "sessions", encodeRepoPath(repoDir))
+	sessionDir := filepath.Join(tmpHome, ".casecodereview", "sessions", encodeRepoPath(repoDir))
 	sessionFile := filepath.Join(sessionDir, sessionID+".jsonl")
 
 	dirInfo, err := os.Stat(sessionDir)

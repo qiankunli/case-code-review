@@ -62,7 +62,7 @@ func runReview(args []string) error {
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
-	// Loads the --spec path plus auto-discovered .ccr/spec.json layers, mirroring
+	// Loads the --spec path plus auto-discovered .casecodereview/spec.json layers, mirroring
 	// how rules are resolved. Nil when no layer exists.
 	specIndex, err := spec.Load(cc.RepoDir, opts.specPath)
 	if err != nil {

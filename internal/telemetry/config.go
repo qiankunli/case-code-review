@@ -58,7 +58,7 @@ func resolveEnv(cfg *Config) {
 	}
 }
 
-// telemetrySection matches the telemetry key in ~/.ccr/config.json.
+// telemetrySection matches the telemetry key in ~/.casecodereview/config.json.
 type telemetrySection struct {
 	Enabled      *bool   `json:"enabled,omitempty"`
 	Exporter     *string `json:"exporter,omitempty"`
@@ -121,11 +121,11 @@ func ResolveConfig(configPath string) Config {
 	return cfg
 }
 
-// HomeConfigPath returns the default path to ~/.ccr/config.json.
+// HomeConfigPath returns the default path to ~/.casecodereview/config.json.
 func HomeConfigPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".ccr", "config.json")
+	return filepath.Join(home, ".casecodereview", "config.json")
 }
