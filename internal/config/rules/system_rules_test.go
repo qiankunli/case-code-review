@@ -218,7 +218,7 @@ func TestNewResolver_ProjectFileMissing(t *testing.T) {
 func TestNewResolver_ProjectRuleHighestPriority(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -253,13 +253,13 @@ func TestNewResolver_ProjectRuleFirstMatchWinsWithinFile(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	// Project rule file:
-	//   <repo>/.ccr/rule.json
+	//   <repo>/.casecodereview/rule.json
 	// Path under test:
 	//   internal/config/rules/system_rules.go -> matches both project entries.
 	// This verifies declaration order inside one JSON rule file: the first
 	// matching entry wins even when a later entry is more specific.
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestNewResolver_ProjectRuleFirstMatchWinsWithinFile(t *testing.T) {
 
 func TestNewResolver_ProjectRuleFallsBackToSystem(t *testing.T) {
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestNewResolver_EmptyRuleSkippedAndFallsBack(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestNewResolver_EmptyRuleMergeSystemRuleReturnsSystemOnly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -395,13 +395,13 @@ func TestNewResolver_ProjectRuleReplacesSystemRuleByDefault(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	// Project rule file:
-	//   <repo>/.ccr/rule.json
+	//   <repo>/.casecodereview/rule.json
 	// Path under test:
 	//   main.go -> matches the project **/*.go rule.
 	// This verifies the default behavior: a user rule replaces the system rule
 	// unless the matched rule entry opts into merge_system_rule.
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -425,13 +425,13 @@ func TestNewResolver_ProjectRuleMergesSystemRule(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	// Project rule file:
-	//   <repo>/.ccr/rule.json
+	//   <repo>/.casecodereview/rule.json
 	// Path under test:
 	//   main.go -> matches both the system Go rule and the project **/*.go rule.
 	// This verifies merge_system_rule keeps both rules without depending on the
 	// exact merge markdown or ordering.
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -467,14 +467,14 @@ func TestNewResolver_MergeSystemRuleKeepsRulePriority(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	// Project rule file:
-	//   <repo>/.ccr/rule.json
+	//   <repo>/.casecodereview/rule.json
 	// Custom rule file:
 	//   <custom>/custom_rules.json, passed as --rule equivalent.
 	// Path under test:
 	//   main.go -> matches custom main.go first, then project **/*.go.
 	// This verifies merging does not change layer priority: custom still wins.
 	repoDir := t.TempDir()
-	ocrDir := filepath.Join(repoDir, ".ccr")
+	ocrDir := filepath.Join(repoDir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -524,7 +524,7 @@ func TestNewResolver_CustomOverridesProject(t *testing.T) {
 
 	// Setup project rule with narrower pattern
 	repoDir := t.TempDir()
-	ocrDir := filepath.Join(repoDir, ".ccr")
+	ocrDir := filepath.Join(repoDir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestNewResolver_CustomOverridesProject(t *testing.T) {
 
 func TestNewResolver_ProjectFileMalformed(t *testing.T) {
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -645,7 +645,7 @@ func TestFileFilter_CaseInsensitive(t *testing.T) {
 
 func TestNewResolver_FileFilterMerged(t *testing.T) {
 	repoDir := t.TempDir()
-	ocrDir := filepath.Join(repoDir, ".ccr")
+	ocrDir := filepath.Join(repoDir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -684,7 +684,7 @@ func TestNewResolver_FileFilterNilWhenEmpty(t *testing.T) {
 
 func TestNewResolver_FileFilterPriorityOverride(t *testing.T) {
 	repoDir := t.TempDir()
-	ocrDir := filepath.Join(repoDir, ".ccr")
+	ocrDir := filepath.Join(repoDir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -727,7 +727,7 @@ func TestNewResolver_FileFilterPriorityOverride(t *testing.T) {
 
 func TestNewResolver_FileFilterFallsToProject(t *testing.T) {
 	repoDir := t.TempDir()
-	ocrDir := filepath.Join(repoDir, ".ccr")
+	ocrDir := filepath.Join(repoDir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -798,7 +798,7 @@ func TestResolveDetail_SystemPatternMatch(t *testing.T) {
 func TestResolveDetail_ProjectOverridesSystem(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -835,13 +835,13 @@ func TestResolveDetail_MergeSystemRule(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	// Project rule file:
-	//   <repo>/.ccr/rule.json
+	//   <repo>/.casecodereview/rule.json
 	// Path under test:
 	//   src/main/foo.java -> matches both the system Java rule and the project rule.
 	// This verifies ResolveDetail reports the matched user rule metadata while
 	// returning merged rule text when the entry sets merge_system_rule.
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -880,7 +880,7 @@ func TestResolveDetail_MergeSystemRule(t *testing.T) {
 func TestResolveDetail_CustomOverridesAll(t *testing.T) {
 	// Project rule
 	repoDir := t.TempDir()
-	ocrDir := filepath.Join(repoDir, ".ccr")
+	ocrDir := filepath.Join(repoDir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -914,7 +914,7 @@ func TestResolveDetail_CustomOverridesAll(t *testing.T) {
 
 func TestNewResolver_BraceExpansionInProjectRule(t *testing.T) {
 	dir := t.TempDir()
-	ocrDir := filepath.Join(dir, ".ccr")
+	ocrDir := filepath.Join(dir, ".casecodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

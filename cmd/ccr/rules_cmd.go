@@ -62,8 +62,8 @@ func runRulesCheck(args []string) error {
 
 	sourceLabel := map[string]string{
 		"custom":  "Custom (--rule)",
-		"project": "Project (.ccr/rule.json)",
-		"global":  "Global (~/.ccr/rule.json)",
+		"project": "Project (.casecodereview/rule.json)",
+		"global":  "Global (~/.casecodereview/rule.json)",
 		"system":  "System built-in",
 	}
 
