@@ -1,6 +1,6 @@
 // Package viewer provides a read-only WebUI for browsing session records
 // produced by case-code-review runs. It scans JSONL files under
-// $HOME/.ccr/sessions/, parses them, and exposes structured data.
+// $HOME/.casecodereview/sessions/, parses them, and exposes structured data.
 package viewer
 
 import (
@@ -20,7 +20,7 @@ func SessionsRoot() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	return filepath.Join(home, ".ccr", "sessions"), nil
+	return filepath.Join(home, ".casecodereview", "sessions"), nil
 }
 
 // RepoInfo represents a discovered repository from the sessions directory.
