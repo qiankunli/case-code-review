@@ -62,9 +62,9 @@ func TestRenderNilIndexSafe(t *testing.T) {
 }
 
 func TestLoadChainCustomOverridesProject(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // isolate ~/.ccr/spec.json (none)
+	t.Setenv("HOME", t.TempDir()) // isolate ~/.casecodereview/spec.json (none)
 	repo := t.TempDir()
-	mustWrite(t, filepath.Join(repo, ".ccr", "spec.json"), `{
+	mustWrite(t, filepath.Join(repo, ".casecodereview", "spec.json"), `{
 	  "a.go::Foo": {"spec": "project-foo"},
 	  "a.go::Bar": {"spec": "project-bar"}
 	}`)
