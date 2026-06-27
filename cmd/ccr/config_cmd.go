@@ -20,11 +20,11 @@ func defaultConfigPath() (string, error) {
 	return filepath.Join(home, ".casecodereview", "config.json"), nil
 }
 
-// resolveConfigPath returns OCR_CONFIG_PATH when set, otherwise the default user config path.
+// resolveConfigPath returns CCR_CONFIG_PATH when set, otherwise the default user config path.
 // Intentionally used only by read-only commands (e.g. ccr llm test). Write paths such as
-// config set and review keep defaultConfigPath() so a leaked OCR_CONFIG_PATH cannot redirect writes.
+// config set and review keep defaultConfigPath() so a leaked CCR_CONFIG_PATH cannot redirect writes.
 func resolveConfigPath() (string, error) {
-	if p := strings.TrimSpace(os.Getenv("OCR_CONFIG_PATH")); p != "" {
+	if p := strings.TrimSpace(os.Getenv("CCR_CONFIG_PATH")); p != "" {
 		return p, nil
 	}
 	return defaultConfigPath()

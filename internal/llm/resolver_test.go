@@ -33,9 +33,9 @@ func TestStripModelSuffix(t *testing.T) {
 }
 
 func TestResolveEndpoint_CCEnvStripsModelSuffix(t *testing.T) {
-	t.Setenv("OCR_LLM_URL", "")
-	t.Setenv("OCR_LLM_TOKEN", "")
-	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("CCR_LLM_URL", "")
+	t.Setenv("CCR_LLM_TOKEN", "")
+	t.Setenv("CCR_LLM_MODEL", "")
 	t.Setenv("ANTHROPIC_BASE_URL", "https://api.example.com")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "test-token")
 	t.Setenv("ANTHROPIC_MODEL", "claude-opus-4-7[1m]")
@@ -53,9 +53,9 @@ func TestResolveEndpoint_CCEnvStripsModelSuffix(t *testing.T) {
 }
 
 func TestResolveEndpoint_CCEnvCleanModelUnchanged(t *testing.T) {
-	t.Setenv("OCR_LLM_URL", "")
-	t.Setenv("OCR_LLM_TOKEN", "")
-	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("CCR_LLM_URL", "")
+	t.Setenv("CCR_LLM_TOKEN", "")
+	t.Setenv("CCR_LLM_MODEL", "")
 	t.Setenv("ANTHROPIC_BASE_URL", "https://api.example.com")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "test-token")
 	t.Setenv("ANTHROPIC_MODEL", "claude-opus-4-7")
@@ -70,9 +70,9 @@ func TestResolveEndpoint_CCEnvCleanModelUnchanged(t *testing.T) {
 }
 
 func TestResolveEndpoint_OCREnvStripsModelSuffix(t *testing.T) {
-	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages")
-	t.Setenv("OCR_LLM_TOKEN", "test-token")
-	t.Setenv("OCR_LLM_MODEL", "claude-haiku[2m]")
+	t.Setenv("CCR_LLM_URL", "https://api.example.com/v1/messages")
+	t.Setenv("CCR_LLM_TOKEN", "test-token")
+	t.Setenv("CCR_LLM_MODEL", "claude-haiku[2m]")
 
 	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
 	if err != nil {
@@ -87,9 +87,9 @@ func TestResolveEndpoint_OCREnvStripsModelSuffix(t *testing.T) {
 }
 
 func TestResolveEndpoint_ConfigFileStripsModelSuffix(t *testing.T) {
-	t.Setenv("OCR_LLM_URL", "")
-	t.Setenv("OCR_LLM_TOKEN", "")
-	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("CCR_LLM_URL", "")
+	t.Setenv("CCR_LLM_TOKEN", "")
+	t.Setenv("CCR_LLM_MODEL", "")
 	t.Setenv("ANTHROPIC_BASE_URL", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_MODEL", "")
@@ -118,9 +118,9 @@ func TestResolveEndpoint_ConfigFileStripsModelSuffix(t *testing.T) {
 }
 
 func TestResolveEndpoint_ConfigAnthropicDefaultsToAuthorization(t *testing.T) {
-	t.Setenv("OCR_LLM_URL", "")
-	t.Setenv("OCR_LLM_TOKEN", "")
-	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("CCR_LLM_URL", "")
+	t.Setenv("CCR_LLM_TOKEN", "")
+	t.Setenv("CCR_LLM_MODEL", "")
 	t.Setenv("ANTHROPIC_BASE_URL", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_MODEL", "")
@@ -148,9 +148,9 @@ func TestResolveEndpoint_ConfigAnthropicDefaultsToAuthorization(t *testing.T) {
 }
 
 func TestResolveEndpoint_ConfigAuthHeaderOverrideToXAPIKey(t *testing.T) {
-	t.Setenv("OCR_LLM_URL", "")
-	t.Setenv("OCR_LLM_TOKEN", "")
-	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("CCR_LLM_URL", "")
+	t.Setenv("CCR_LLM_TOKEN", "")
+	t.Setenv("CCR_LLM_MODEL", "")
 	t.Setenv("ANTHROPIC_BASE_URL", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_MODEL", "")
@@ -179,9 +179,9 @@ func TestResolveEndpoint_ConfigAuthHeaderOverrideToXAPIKey(t *testing.T) {
 }
 
 func TestResolveEndpoint_ConfigOpenAIIgnoresAuthHeader(t *testing.T) {
-	t.Setenv("OCR_LLM_URL", "")
-	t.Setenv("OCR_LLM_TOKEN", "")
-	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("CCR_LLM_URL", "")
+	t.Setenv("CCR_LLM_TOKEN", "")
+	t.Setenv("CCR_LLM_MODEL", "")
 	t.Setenv("ANTHROPIC_BASE_URL", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_MODEL", "")
@@ -213,10 +213,10 @@ func TestResolveEndpoint_ConfigOpenAIIgnoresAuthHeader(t *testing.T) {
 }
 
 func TestResolveEndpoint_OCREnvAuthHeader(t *testing.T) {
-	t.Setenv("OCR_LLM_URL", "https://api.anthropic.com")
-	t.Setenv("OCR_LLM_TOKEN", "oauth-token")
-	t.Setenv("OCR_LLM_MODEL", "claude-opus-4-6")
-	t.Setenv("OCR_LLM_AUTH_HEADER", "authorization")
+	t.Setenv("CCR_LLM_URL", "https://api.anthropic.com")
+	t.Setenv("CCR_LLM_TOKEN", "oauth-token")
+	t.Setenv("CCR_LLM_MODEL", "claude-opus-4-6")
+	t.Setenv("CCR_LLM_AUTH_HEADER", "authorization")
 
 	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
 	if err != nil {
@@ -228,11 +228,11 @@ func TestResolveEndpoint_OCREnvAuthHeader(t *testing.T) {
 }
 
 func TestResolveEndpoint_OCREnvOpenAIIgnoresAuthHeader(t *testing.T) {
-	t.Setenv("OCR_LLM_URL", "https://api.openai.com/v1")
-	t.Setenv("OCR_LLM_TOKEN", "openai-token")
-	t.Setenv("OCR_LLM_MODEL", "gpt-4")
-	t.Setenv("OCR_LLM_AUTH_HEADER", "x-api-key")
-	t.Setenv("OCR_USE_ANTHROPIC", "false")
+	t.Setenv("CCR_LLM_URL", "https://api.openai.com/v1")
+	t.Setenv("CCR_LLM_TOKEN", "openai-token")
+	t.Setenv("CCR_LLM_MODEL", "gpt-4")
+	t.Setenv("CCR_LLM_AUTH_HEADER", "x-api-key")
+	t.Setenv("CCR_USE_ANTHROPIC", "false")
 
 	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
 	if err != nil {
@@ -251,7 +251,7 @@ func TestResolveEndpoint_OCREnvOpenAIIgnoresAuthHeader(t *testing.T) {
 func clearAllEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC",
+		"CCR_LLM_URL", "CCR_LLM_TOKEN", "CCR_LLM_MODEL", "CCR_LLM_AUTH_HEADER", "CCR_USE_ANTHROPIC",
 		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 	} {
