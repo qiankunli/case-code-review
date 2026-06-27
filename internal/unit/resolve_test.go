@@ -33,3 +33,33 @@ func (s *Svc) Beta() int {
 		t.Error("unparseable source should resolve to false")
 	}
 }
+
+func TestGoCalleesOf(t *testing.T) {
+	src := `package p
+
+func (s *Svc) Create(req Req) error {
+	validate(req)
+	return s.store(req)
+}
+
+func other() {}
+`
+	got := GoCalleesOf("p.go", src, "Svc.Create") // bare names: free call + selector
+	want := map[string]bool{"validate": true, "store": true}
+	for _, n := range got {
+		if !want[n] {
+			t.Errorf("unexpected callee %q in %v", n, got)
+		}
+		delete(want, n)
+	}
+	if len(want) != 0 {
+		t.Errorf("missing callees %v (got %v)", want, got)
+	}
+
+	if GoCalleesOf("p.go", src, "Nope") != nil {
+		t.Error("unknown symbol should resolve to nil")
+	}
+	if GoCalleesOf("p.go", "func (", "X") != nil {
+		t.Error("unparseable source should resolve to nil")
+	}
+}

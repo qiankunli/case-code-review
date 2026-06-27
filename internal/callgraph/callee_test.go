@@ -1,0 +1,60 @@
+package callgraph
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/qiankunli/case-code-review/internal/spec"
+	"github.com/qiankunli/case-code-review/internal/unit"
+)
+
+func TestCalleeFinder_DependsOnCalleeSpec(t *testing.T) {
+	// Svc.Create (the changed func) calls validate, which carries a spec.
+	repo := newRepo(t, map[string]string{
+		"svc.go":      "package p\n\nfunc (s *Svc) Create(req Req) error {\n\treturn validate(req)\n}\n",
+		"validate.go": "package p\n\nfunc validate(req Req) error {\n\treturn nil\n}\n",
+	})
+	idx, err := spec.Parse([]byte(`{"validate.go::validate": {"spec": "rejects an empty tenant"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	u := unit.Unit{Scope: unit.ScopeFunc, Path: "svc.go", Symbols: []string{"svc.go::Svc.Create"}}
+	clues := CalleeFinder{RepoDir: repo, Index: idx}.Find(u)
+
+	if len(clues) != 1 {
+		t.Fatalf("want 1 callee clue, got %d: %+v", len(clues), clues)
+	}
+	if clues[0].Kind != unit.ClueCallee || clues[0].Ref != "validate.go::validate" ||
+		!strings.Contains(clues[0].Text, "rejects an empty tenant") {
+		t.Errorf("clue off: %+v", clues[0])
+	}
+}
+
+func TestCalleeFinder_Degrades(t *testing.T) {
+	u := unit.Unit{Scope: unit.ScopeFunc, Symbols: []string{"a.go::f"}}
+	if got := (CalleeFinder{}).Find(u); got != nil {
+		t.Errorf("no repo/index should degrade to nil, got %+v", got)
+	}
+	idx, _ := spec.Parse([]byte(`{"x.go::v": {"spec": "s"}}`))
+	file := unit.Unit{Scope: unit.ScopeFile, Path: "a.go"}
+	if got := (CalleeFinder{RepoDir: t.TempDir(), Index: idx}).Find(file); got != nil {
+		t.Errorf("file-scope unit should degrade to nil, got %+v", got)
+	}
+}
+
+func TestSymbolHasName(t *testing.T) {
+	for _, c := range []struct {
+		sym, fn string
+		want    bool
+	}{
+		{"Svc.Create", "Create", true},
+		{"validate", "validate", true},
+		{"Svc.Create", "create", false},
+		{"helper", "other", false},
+	} {
+		if got := symbolHasName(c.sym, c.fn); got != c.want {
+			t.Errorf("symbolHasName(%q,%q)=%v, want %v", c.sym, c.fn, got, c.want)
+		}
+	}
+}
