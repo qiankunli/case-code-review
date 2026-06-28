@@ -10,17 +10,18 @@ import (
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
-// CalleeFinder surfaces the contracts a changed function DEPENDS ON: it extracts
-// the function's callees (go/ast), resolves each to its definition (git grep),
-// and — if a callee has a spec — attaches it as a ClueCallee. Symmetric to
-// CallerFinder (which walks up to the governing spec); this looks down to what
+// CalleeFinder surfaces the contracts a changed function DEPENDS ON: it walks
+// down to the function's callees (up to Depth hops), stopping each branch at the
+// nearest spec-bearing callee and attaching its spec as a ClueCallee. Symmetric
+// to CallerFinder (which walks up to the governing spec); this looks down to what
 // the change relies on, so the reviewer can check the change still honours those
-// callees' contracts. Go-only and depth-1; bounded by Max, degrading to nil.
+// callees' contracts. Go-only; bounded by Max/Depth, degrading to nil.
 type CalleeFinder struct {
 	RepoDir string
 	Index   spec.Index
 	Runner  *gitcmd.Runner
 	Max     int
+	Depth   int // hops to walk down (0 -> default 2)
 }
 
 func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
@@ -31,44 +32,38 @@ func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
 	if max <= 0 {
 		max = defaultMaxResults
 	}
-	self := map[string]bool{}
-	for _, sym := range u.Symbols {
-		self[sym] = true
-	}
+	return walkForSpecs(f.Index, u.Symbols, f.callees, f.Depth, max, func(id string) unit.Clue {
+		return unit.Clue{
+			Kind: unit.ClueCallee,
+			Text: "(depends on callee " + id + ", which guarantees)\n" + f.Index.Render([]string{id}),
+			Ref:  id,
+		}
+	})
+}
 
-	emitted := map[string]bool{}
-	var clues []unit.Clue
-	for _, symID := range u.Symbols {
-		path, sym, ok := unit.SplitID(symID)
-		if !ok {
-			continue
-		}
-		src, err := os.ReadFile(filepath.Join(f.RepoDir, path))
-		if err != nil {
-			continue
-		}
-		for _, callee := range unit.GoCalleesOf(path, string(src), sym) {
-			for _, id := range f.resolveDefs(callee, max) {
-				if self[id] || emitted[id] { // skip self-recursion / dupes
-					continue
-				}
-				e, ok := f.Index[id]
-				if !ok || (e.Spec == "" && len(e.Cases) == 0) {
-					continue
-				}
-				emitted[id] = true
-				clues = append(clues, unit.Clue{
-					Kind: unit.ClueCallee,
-					Text: "(depends on callee " + id + ", which guarantees)\n" + f.Index.Render([]string{id}),
-					Ref:  id,
-				})
-				if len(emitted) >= max {
-					return clues
-				}
+// callees returns the unit-ids of functions that funcID calls — extract the
+// callees from its body (go/ast), then resolve each name to its definition.
+func (f CalleeFinder) callees(funcID string) []string {
+	path, sym, ok := unit.SplitID(funcID)
+	if !ok {
+		return nil
+	}
+	src, err := os.ReadFile(filepath.Join(f.RepoDir, path))
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, name := range unit.GoCalleesOf(path, string(src), sym) {
+		for _, id := range f.resolveDefs(name, defaultMaxResults) {
+			if id == funcID || seen[id] {
+				continue
 			}
+			seen[id] = true
+			ids = append(ids, id)
 		}
 	}
-	return clues
+	return ids
 }
 
 // resolveDefs greps for Go definitions of name — a free function `func name(` or

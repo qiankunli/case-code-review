@@ -1,7 +1,8 @@
 // Package callgraph supplies call-graph-derived review context via two
 // ClueFinders: CallerFinder recovers a changed function's GOVERNING spec by
-// walking one hop up to its callers; CalleeFinder surfaces the contracts the
-// function DEPENDS ON by looking one hop down to its callees. Both are
+// walking up to its callers; CalleeFinder surfaces the contracts the function
+// DEPENDS ON by walking down to its callees. Both share one bounded walk
+// (walkForSpecs) and differ only in their neighbor function. They are
 // deliberately lightweight (git grep + go/ast, no whole-repo type checking) so
 // they work on a diff that may not even compile, and degrade to nothing whenever
 // they can't help.
@@ -16,17 +17,17 @@ import (
 )
 
 // CallerFinder supplies a changed function's governing spec when the function
-// carries none of its own: it greps one hop up to its callers, resolves each hit
-// to the calling function's unit-id, and — if a caller has a spec — attaches it
-// as an inherited ClueCaller. Spec lives on entry functions (api-handlers) while
-// a diff often lands on a deep helper, so the contract to preserve is the
-// caller's. Go-only and depth-1 for now; bounded by Max and degrading to nil on
-// any miss, so it is always safe to install.
+// carries none of its own: it walks up to its callers (up to Depth hops),
+// stopping each branch at the nearest spec-bearing ancestor and attaching its
+// spec as an inherited ClueCaller. Spec lives on entry functions (api-handlers)
+// while a diff often lands on a deep helper, so the contract to preserve is the
+// caller's. Go-only; bounded by Max/Depth and degrading to nil on any miss.
 type CallerFinder struct {
 	RepoDir string
 	Index   spec.Index
 	Runner  *gitcmd.Runner // optional; falls back to exec when nil
 	Max     int            // cap on resolved spec-bearing callers (0 -> default)
+	Depth   int            // hops to walk up (0 -> default 2)
 }
 
 func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
@@ -42,45 +43,37 @@ func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
 			return nil
 		}
 	}
-
 	max := f.Max
 	if max <= 0 {
 		max = defaultMaxResults
 	}
-	self := map[string]bool{}
-	for _, sym := range u.Symbols {
-		self[sym] = true
-	}
+	return walkForSpecs(f.Index, u.Symbols, f.callers, f.Depth, max, func(id string) unit.Clue {
+		return unit.Clue{
+			Kind: unit.ClueCaller,
+			Text: "(governing spec inherited from caller " + id + ")\n" + f.Index.Render([]string{id}),
+			Ref:  id,
+		}
+	})
+}
 
-	emitted := map[string]bool{}
-	var clues []unit.Clue
-	for _, sym := range u.Symbols {
-		name := funcName(sym)
-		if name == "" {
+// callers returns the unit-ids of functions that call funcID — git grep the
+// function's name, then resolve each call site to its enclosing function.
+func (f CallerFinder) callers(funcID string) []string {
+	name := funcName(funcID)
+	if name == "" {
+		return nil
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, h := range grepGo(f.RepoDir, f.Runner, []string{"-w", "-e", name}, defaultMaxResults*4) {
+		id, ok := funcIDAt(f.RepoDir, h)
+		if !ok || id == funcID || seen[id] { // skip funcID's own definition / recursion / dupes
 			continue
 		}
-		// Word-match the called name; resolution + dedup narrows to Max, so over-fetch.
-		for _, h := range grepGo(f.RepoDir, f.Runner, []string{"-w", "-e", name}, max*4) {
-			id, ok := funcIDAt(f.RepoDir, h)
-			if !ok || self[id] || emitted[id] { // skip the definition / recursion / dupes
-				continue
-			}
-			e, ok := f.Index[id]
-			if !ok || (e.Spec == "" && len(e.Cases) == 0) {
-				continue
-			}
-			emitted[id] = true
-			clues = append(clues, unit.Clue{
-				Kind: unit.ClueCaller,
-				Text: "(governing spec inherited from caller " + id + ")\n" + f.Index.Render([]string{id}),
-				Ref:  id,
-			})
-			if len(emitted) >= max {
-				return clues
-			}
-		}
+		seen[id] = true
+		ids = append(ids, id)
 	}
-	return clues
+	return ids
 }
 
 // funcName returns the bare function/method name from a unit-id, for grepping:
