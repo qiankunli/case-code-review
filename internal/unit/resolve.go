@@ -4,7 +4,37 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strings"
 )
+
+// FuncIDAt resolves a 1-indexed line to its enclosing function's unit-id,
+// dispatching by file extension (.go via go/ast, .py via python3). Returns
+// ("", false) for unsupported languages or on any parse failure. This is the
+// language-agnostic entry the call-graph finders use.
+func FuncIDAt(path, src string, line int) (string, bool) {
+	switch {
+	case strings.HasSuffix(path, ".go"):
+		return GoFuncIDAt(path, src, line)
+	case strings.HasSuffix(path, ".py"):
+		return PyFuncIDAt(path, src, line)
+	default:
+		return "", false
+	}
+}
+
+// CalleesOf returns the bare names of the functions called inside the function
+// identified by symbol, dispatching by file extension. Returns nil for
+// unsupported languages or on any parse failure.
+func CalleesOf(path, src, symbol string) []string {
+	switch {
+	case strings.HasSuffix(path, ".go"):
+		return GoCalleesOf(path, src, symbol)
+	case strings.HasSuffix(path, ".py"):
+		return PyCalleesOf(path, src, symbol)
+	default:
+		return nil
+	}
+}
 
 // GoFuncIDAt parses Go source and returns the unit-id of the function enclosing
 // the given 1-indexed line, or ("", false) when the line is outside any function
