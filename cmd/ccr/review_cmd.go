@@ -46,6 +46,9 @@ func runReview(args []string) error {
 	if opts.preview {
 		return runPreview(cc, opts)
 	}
+	if opts.dryRun {
+		return runDryRun(cc, opts)
+	}
 
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
 	if err != nil {
@@ -186,6 +189,34 @@ func runPreview(cc *commonContext, opts reviewOptions) error {
 	}
 
 	outputPreviewText(preview)
+	return nil
+}
+
+// runDryRun assembles and prints each review unit's context (spec/case/rule/link
+// + caller/callee) without an LLM call — needs the spec index + rule resolver,
+// but no LLM runtime, so it works whether or not the LLM is configured.
+func runDryRun(cc *commonContext, opts reviewOptions) error {
+	specIndex, err := spec.Load(cc.RepoDir, opts.specPath)
+	if err != nil {
+		return fmt.Errorf("load spec: %w", err)
+	}
+	ag := agent.New(agent.Args{
+		RepoDir:    cc.RepoDir,
+		From:       opts.from,
+		To:         opts.to,
+		Commit:     opts.commit,
+		FileFilter: cc.FileFilter,
+		GitRunner:  cc.GitRunner,
+		SpecIndex:  specIndex,
+		SystemRule: cc.Resolver,
+		Background: opts.background,
+	})
+
+	units, err := ag.DryRunContext(context.Background())
+	if err != nil {
+		return fmt.Errorf("dry-run failed: %w", err)
+	}
+	outputDryRunText(units)
 	return nil
 }
 

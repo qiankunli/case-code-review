@@ -278,6 +278,28 @@ func outputJSONNoFiles() error {
 	return enc.Encode(out)
 }
 
+// outputDryRunText prints each review unit's assembled context — what the LLM
+// would receive — for `ccr review --dry-run`.
+func outputDryRunText(units []agent.UnitContext) {
+	if len(units) == 0 {
+		fmt.Println("No reviewable units.")
+		return
+	}
+	for _, u := range units {
+		fmt.Printf("\n========== %s ==========\n", sanitizeTerminal(u.ID))
+		dryRunSection("Governing Spec/Case", u.SpecCases)
+		dryRunSection("Review Rules", u.Rules)
+		dryRunSection("See Also", u.SeeAlso)
+	}
+}
+
+func dryRunSection(title, body string) {
+	if strings.TrimSpace(body) == "" {
+		body = "(none)"
+	}
+	fmt.Printf("── %s ──\n%s\n", title, body)
+}
+
 func outputPreviewText(p *agent.DiffPreview) {
 	if p.TotalFiles == 0 {
 		fmt.Println("No files changed.")
