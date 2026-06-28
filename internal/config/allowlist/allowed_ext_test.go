@@ -88,6 +88,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"rust test file", "src/parser_test.rs", true},
 		{"rust non-test", "src/parser.rs", false},
 
+		// ccr's own config dir — not reviewable
+		{"config dir at root", ".casecodereview/spec.json", true},
+		{"config dir rule.json", ".casecodereview/rule.json", true},
+		{"config dir nested", "sub/.casecodereview/spec.json", true},
+		{"not the config dir", "internal/foo.go", false},
+
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},
 		{"oh_modules nested", "entry/oh_modules/lib/index.ets", true},
