@@ -33,7 +33,8 @@ func grepGo(repoDir string, runner *gitcmd.Runner, matchArgs []string, maxHits i
 	defer cancel()
 
 	args := append([]string{"--no-pager", "grep", "-n", "--no-color"}, matchArgs...)
-	args = append(args, "--", "*.go")
+	// Both supported languages; funcIDAt dispatches per hit file by extension.
+	args = append(args, "--", "*.go", "*.py")
 	out, err := gitOutput(ctx, repoDir, runner, args)
 	if err != nil {
 		return nil
@@ -74,11 +75,11 @@ func gitOutput(ctx context.Context, repoDir string, runner *gitcmd.Runner, args 
 }
 
 // funcIDAt reads the hit's file (under repoDir) and resolves the line to the
-// unit-id of its enclosing function.
+// unit-id of its enclosing function — dispatched by extension (Go / Python).
 func funcIDAt(repoDir string, h hit) (string, bool) {
 	src, err := os.ReadFile(filepath.Join(repoDir, h.file))
 	if err != nil {
 		return "", false
 	}
-	return unit.GoFuncIDAt(h.file, string(src), h.line)
+	return unit.FuncIDAt(h.file, string(src), h.line)
 }

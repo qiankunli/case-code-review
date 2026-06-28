@@ -92,3 +92,36 @@ func TestAutoSplitter_RoutesByExtension(t *testing.T) {
 		t.Fatalf("txt should route to file scope, got %v", ids(units))
 	}
 }
+
+func TestPyFuncIDAt(t *testing.T) {
+	requirePython3(t)
+	src := "def alpha():\n    helper()\n\n\nclass Svc:\n    def do(self):\n        return validate()\n"
+	if id, ok := PyFuncIDAt("p.py", src, 2); !ok || id != "p.py::alpha" {
+		t.Errorf("line 2 -> (%q,%v); want p.py::alpha", id, ok)
+	}
+	if id, ok := PyFuncIDAt("p.py", src, 7); !ok || id != "p.py::Svc.do" { // method id is Class.method
+		t.Errorf("line 7 -> (%q,%v); want p.py::Svc.do", id, ok)
+	}
+	if _, ok := PyFuncIDAt("p.py", "def (", 1); ok {
+		t.Error("unparseable source should resolve to false")
+	}
+}
+
+func TestPyCalleesOf(t *testing.T) {
+	requirePython3(t)
+	src := "class Svc:\n    def create(self, req):\n        validate(req)\n        return self.store(req)\n"
+	got := PyCalleesOf("p.py", src, "Svc.create")
+	want := map[string]bool{"validate": true, "store": true} // Name call + Attribute call
+	for _, n := range got {
+		if !want[n] {
+			t.Errorf("unexpected callee %q in %v", n, got)
+		}
+		delete(want, n)
+	}
+	if len(want) != 0 {
+		t.Errorf("missing callees %v (got %v)", want, got)
+	}
+	if PyCalleesOf("p.py", src, "Nope") != nil {
+		t.Error("unknown symbol should resolve to nil")
+	}
+}

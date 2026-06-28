@@ -79,3 +79,70 @@ func parsePyFuncs(path, src string) ([]funcSpan, error) {
 	}
 	return spans, nil
 }
+
+// PyFuncIDAt is the Python counterpart of GoFuncIDAt: it returns the unit-id of
+// the function enclosing the given 1-indexed line, or ("", false) when the line
+// is outside any function, python3 is unavailable, or src is unparseable.
+func PyFuncIDAt(path, src string, line int) (string, bool) {
+	spans, err := parsePyFuncs(path, src)
+	if err != nil {
+		return "", false
+	}
+	for _, s := range spans {
+		if line >= s.start && line <= s.end {
+			return s.id, true
+		}
+	}
+	return "", false
+}
+
+// pyCalleesAST reads Python source on stdin and the target symbol (sys.argv[1],
+// "func" or "Class.method"), finds that function, and prints the JSON list of
+// bare names it calls (Name f() and Attribute x.f() both yield "f"), so callee
+// resolution can grep for matching `def` definitions.
+const pyCalleesAST = `
+import ast, json, sys
+target = sys.argv[1] if len(sys.argv) > 1 else ""
+try:
+    tree = ast.parse(sys.stdin.read())
+except SyntaxError:
+    print("[]"); sys.exit(0)
+hit = []
+def find(node, stack):
+    for c in ast.iter_child_nodes(node):
+        if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if ".".join(stack + [c.name]) == target:
+                hit.append(c)
+        elif isinstance(c, ast.ClassDef):
+            find(c, stack + [c.name])
+find(tree, [])
+names, seen = [], set()
+if hit:
+    for n in ast.walk(hit[0]):
+        if isinstance(n, ast.Call):
+            f = n.func
+            nm = f.id if isinstance(f, ast.Name) else (f.attr if isinstance(f, ast.Attribute) else None)
+            if nm and nm not in seen:
+                seen.add(nm); names.append(nm)
+json.dump(names, sys.stdout)
+`
+
+// PyCalleesOf is the Python counterpart of GoCalleesOf: the bare names of the
+// functions/methods called inside the function identified by symbol. Returns nil
+// if python3 is unavailable, src is unparseable, or the symbol isn't found.
+func PyCalleesOf(path, src, symbol string) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "python3", "-c", pyCalleesAST, symbol)
+	cmd.Stdin = strings.NewReader(src)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	if err := json.Unmarshal(out, &names); err != nil || len(names) == 0 {
+		return nil // match GoCalleesOf: nil (not an empty slice) when nothing is found
+	}
+	return names
+}
