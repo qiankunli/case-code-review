@@ -89,6 +89,21 @@ func encodeRepoPath(p string) string {
 	return result
 }
 
+// LogPath returns this session's stderr-log path, co-located with its JSONL
+// transcript (<sessions>/<encoded-repo>/<session-id>.log), creating the
+// directory. Lets a run mirror its warnings/errors next to the model-call trace.
+func (s *SessionHistory) LogPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	dir := filepath.Join(home, ".casecodereview", "sessions", encodeRepoPath(s.RepoDir))
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", fmt.Errorf("create session dir: %w", err)
+	}
+	return filepath.Join(dir, s.SessionID+".log"), nil
+}
+
 func (jw *jsonlWriter) open() error {
 	home, err := os.UserHomeDir()
 	if err != nil {

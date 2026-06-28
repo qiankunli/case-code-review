@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"runtime"
 	"testing"
 	"time"
@@ -261,5 +262,25 @@ func TestSessionEndIncludesFailures(t *testing.T) {
 	}
 	if int64(failures) != 3 {
 		t.Errorf("llm_failures = %v, want 3", failures)
+	}
+}
+
+func TestLogPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	s := New("/some/repo", "main", "model", SessionOptions{})
+
+	p, err := s.LogPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(p, s.SessionID+".log") {
+		t.Errorf("log path should end with <session-id>.log, got %q", p)
+	}
+	// it must live next to where the JSONL transcript would, and the dir exists.
+	if !strings.Contains(p, filepath.Join(".casecodereview", "sessions")) {
+		t.Errorf("log should be under .casecodereview/sessions, got %q", p)
+	}
+	if _, err := os.Stat(filepath.Dir(p)); err != nil {
+		t.Errorf("session dir should be created: %v", err)
 	}
 }
