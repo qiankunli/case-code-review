@@ -101,3 +101,27 @@ func newRepo(t *testing.T, files map[string]string) string {
 	}
 	return repo
 }
+
+func TestCallerFinder_Depth2(t *testing.T) {
+	// deepHelper (changed, no spec) <- mid (no spec) <- Entry (spec): two hops up.
+	repo := newRepo(t, map[string]string{
+		"f.go": "package p\n\nfunc deepHelper() error {\n\treturn nil\n}\n",
+		"g.go": "package p\n\nfunc mid() error {\n\treturn deepHelper()\n}\n",
+		"h.go": "package p\n\nfunc Entry() error {\n\treturn mid()\n}\n",
+	})
+	idx, err := spec.Parse([]byte(`{"h.go::Entry": {"spec": "the governing contract"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := unit.Unit{Scope: unit.ScopeFunc, Path: "f.go", Symbols: []string{"f.go::deepHelper"}}
+
+	// depth 2 walks deepHelper <- mid <- Entry and inherits Entry's spec.
+	clues := CallerFinder{RepoDir: repo, Index: idx, Depth: 2}.Find(u)
+	if len(clues) != 1 || clues[0].Ref != "h.go::Entry" {
+		t.Fatalf("depth 2 should inherit Entry's spec, got %+v", clues)
+	}
+	// depth 1 stops at mid (no spec of its own) — nothing to inherit.
+	if got := (CallerFinder{RepoDir: repo, Index: idx, Depth: 1}).Find(u); got != nil {
+		t.Errorf("depth 1 should find nothing (mid has no spec), got %+v", got)
+	}
+}
