@@ -218,6 +218,12 @@ Examples:
   ccr review --preview
   ccr review -c abc123 -p
 
+  # Print each unit's assembled context (spec/case/rule/link + caller/callee), no LLM
+  ccr review --dry-run
+
+  # Inject contract context from a spec.json (specgen output; also auto-loaded from .casecodereview/spec.json)
+  ccr review --spec spec.json
+
 Flags:
   --audience string       output audience: human (show progress) or agent (summary only) (default "human")
   -b, --background string optional requirement/business context for the review
@@ -229,8 +235,10 @@ Flags:
   --max-tools int         max tool call rounds per file (0 = template default; min 10)
   --model string          override LLM model for this review (e.g., claude-opus-4-6)
   -p, --preview           preview which files will be reviewed without running the LLM
+  --dry-run               assemble and print each review unit's context (spec/case/rule/link + caller/callee) without running the LLM
   --repo string           root directory of the git repository (default: current dir)
   --rule string           path to JSON file with system review rules
+  --spec string           path to spec.json (specgen output); also auto-loaded from .casecodereview/spec.json
   --timeout int           concurrent task timeout in minutes (default 10)
   --to string             target ref to end diff at (e.g., 'feature-branch')
   --tools string          path to JSON tools config file (default: embedded)`)
