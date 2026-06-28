@@ -54,7 +54,7 @@ func (f CalleeFinder) callees(funcID string) []string {
 	}
 	var ids []string
 	seen := map[string]bool{}
-	for _, name := range unit.GoCalleesOf(path, string(src), sym) {
+	for _, name := range unit.CalleesOf(path, string(src), sym) {
 		for _, id := range f.resolveDefs(name, defaultMaxResults) {
 			if id == funcID || seen[id] {
 				continue
@@ -70,8 +70,9 @@ func (f CalleeFinder) callees(funcID string) []string {
 // a method `func (recv) name(` — and resolves each to its unit-id, guarding that
 // the resolved function actually carries that name.
 func (f CalleeFinder) resolveDefs(name string, max int) []string {
-	// -P: `func`, then a space (free func) or a receiver `(...)`, then name, then `(`.
-	pat := `func(\s+|\s*\([^)]*\)\s*)` + name + `\s*\(`
+	// -P: a Go func/method (`func name(` or `func (recv) name(`) or a Python
+	// `def name(`. funcIDAt dispatches per hit file; symbolHasName guards.
+	pat := `(func(\s+|\s*\([^)]*\)\s*)|def\s+)` + name + `\s*\(`
 	var ids []string
 	seen := map[string]bool{}
 	for _, h := range grepGo(f.RepoDir, f.Runner, []string{"-P", "-e", pat}, max*4) {
