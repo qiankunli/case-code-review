@@ -176,6 +176,7 @@ func (a *Agent) TotalCacheReadTokens() int64 { return a.runner.TotalCacheReadTok
 func (a *Agent) TotalCacheWriteTokens() int64 {
 	return a.runner.TotalCacheWriteTokens()
 }
+func (a *Agent) ModelsUsed() map[string]int { return a.runner.ModelsUsed() }
 
 // Warnings returns the warnings recorded by the LLM runner.
 func (a *Agent) Warnings() []llmloop.AgentWarning { return a.runner.Warnings() }

@@ -314,6 +314,10 @@ func (a *Agent) Warnings() []AgentWarning { return a.runner.Warnings() }
 // ToolCalls returns per-tool call counts accumulated during review.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
+// ModelsUsed returns the routing aliases that served a response this review,
+// each with its response count (deduped). Empty for a single-model run.
+func (a *Agent) ModelsUsed() map[string]int { return a.runner.ModelsUsed() }
+
 // recordWarning adds a non-fatal warning to the agent's warning list.
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)

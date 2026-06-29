@@ -184,6 +184,10 @@ type jsonSummary struct {
 	CacheReadTokens  int64  `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int64  `json:"cache_write_tokens,omitempty"`
 	Elapsed          string `json:"elapsed"`
+	// Models maps each routing alias that served a response to its count (deduped).
+	// The review's model identity — present even on a clean (no-finding) review.
+	// Omitted for a single-model (non-routing) run.
+	Models map[string]int `json:"models,omitempty"`
 }
 
 type jsonToolCalls struct {
@@ -216,7 +220,7 @@ func outputJSON(comments []model.LlmComment) error {
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
-	duration time.Duration, projectSummary string, toolCalls map[string]int64) error {
+	duration time.Duration, projectSummary string, toolCalls map[string]int64, models map[string]int) error {
 	out := jsonOutput{
 		Status:   "success",
 		Comments: comments,
@@ -229,6 +233,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			CacheReadTokens:  cacheReadTokens,
 			CacheWriteTokens: cacheWriteTokens,
 			Elapsed:          duration.Round(time.Second).String(),
+			Models:           models,
 		},
 		ProjectSummary: projectSummary,
 	}
