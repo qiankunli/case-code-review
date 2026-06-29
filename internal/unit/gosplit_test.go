@@ -7,7 +7,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/model"
 )
 
-// fragID is the unit-id a fragment represents: its sole symbol for a function
+// fragID is the symbol-id a fragment represents: its sole symbol for a function
 // fragment, or its path for a residual/whole-file fragment.
 func fragID(f Fragment) string {
 	if len(f.Symbols) >= 1 {
@@ -24,7 +24,7 @@ func ids(frags []Fragment) []string {
 	return out
 }
 
-// findFrag returns the fragment with the given unit-id (or path, for the
+// findFrag returns the fragment with the given symbol-id (or path, for the
 // residual), or fails.
 func findFrag(t *testing.T, frags []Fragment, id string) Fragment {
 	t.Helper()

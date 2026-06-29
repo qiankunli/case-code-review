@@ -80,7 +80,7 @@ func parsePyFuncs(path, src string) ([]funcSpan, error) {
 	return spans, nil
 }
 
-// PyFuncIDAt is the Python counterpart of GoFuncIDAt: it returns the unit-id of
+// PyFuncIDAt is the Python counterpart of GoFuncIDAt: it returns the symbol-id of
 // the function enclosing the given 1-indexed line, or ("", false) when the line
 // is outside any function, python3 is unavailable, or src is unparseable.
 func PyFuncIDAt(path, src string, line int) (string, bool) {
