@@ -50,6 +50,8 @@ type Runner struct {
 	warnings              []AgentWarning
 	toolCallsMu           sync.Mutex
 	toolCalls             map[string]int64
+	modelsMu              sync.Mutex
+	models                map[string]int // routing alias -> #responses it served this run (dedup by key)
 	compressionMu         sync.Mutex
 	pendingJob            *compressionJob
 }
@@ -116,6 +118,33 @@ func (r *Runner) recordToolCall(name string) {
 	r.toolCallsMu.Unlock()
 }
 
+// recordModel counts one response served by a routing alias. Empty alias
+// (single-model / non-routing config) is ignored — there's no alias to report.
+func (r *Runner) recordModel(alias string) {
+	if alias == "" {
+		return
+	}
+	r.modelsMu.Lock()
+	if r.models == nil {
+		r.models = make(map[string]int)
+	}
+	r.models[alias]++
+	r.modelsMu.Unlock()
+}
+
+// ModelsUsed returns the run's model identity: each routing alias that served a
+// response mapped to how many it served (deduped by key). Run-level — present
+// even when no finding was produced. Empty for a single-model (non-routing) run.
+func (r *Runner) ModelsUsed() map[string]int {
+	r.modelsMu.Lock()
+	defer r.modelsMu.Unlock()
+	out := make(map[string]int, len(r.models))
+	for alias, n := range r.models {
+		out[alias] = n
+	}
+	return out
+}
+
 // RecordUsage adds the prompt/completion/cache tokens reported by an LLM
 // response to the runner's aggregate counters. Used by callers (plan phase
 // in agent / future scan phases) that perform their own LLM calls outside
@@ -176,6 +205,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			return fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
+		r.recordModel(resp.Alias) // run-level model identity; counts every response, not just ones with findings
 		totalTokens := int64(0)
 		if resp.Usage != nil {
 			totalTokens = resp.Usage.TotalTokens
