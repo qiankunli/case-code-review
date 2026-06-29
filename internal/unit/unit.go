@@ -163,6 +163,20 @@ func CoalesceFile(d model.Diff, frags []Fragment) Unit {
 	return Unit{ID: d.NewPath, Scope: ScopeFile, Fragments: []Fragment{whole}}
 }
 
+// NewChainUnit groups call-adjacent changed functions (possibly across files)
+// into one ScopeCallChain review Unit — a requirement's change reviewed along the
+// call chain it touched. Callers should pass Fragments in a stable order (e.g.
+// sorted by path/symbol) so the ID is deterministic.
+func NewChainUnit(frags []Fragment) Unit {
+	var names []string
+	for _, f := range frags {
+		for _, s := range f.Symbols {
+			names = append(names, symbolName(s))
+		}
+	}
+	return Unit{ID: "chain:" + strings.Join(names, "+"), Scope: ScopeCallChain, Fragments: frags}
+}
+
 // symbolName returns the bare symbol from a unit-id ("p/x.go::Svc.Get" -> "Svc.Get")
 // for building a Unit ID; falls back to the whole string when it isn't an id.
 func symbolName(unitID string) string {
