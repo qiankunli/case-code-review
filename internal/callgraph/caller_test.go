@@ -88,8 +88,13 @@ func TestUnexportedScope(t *testing.T) {
 		{"x.go", "", ""},                                // empty name
 	}
 	for _, c := range cases {
-		if got := unexportedScope(c.path, c.name); got != c.want {
+		got := unexportedScope(c.path, c.name)
+		if got != c.want {
 			t.Errorf("unexportedScope(%q,%q)=%q want %q", c.path, c.name, got, c.want)
+		}
+		// git pathspecs are always '/'-separated, even on Windows.
+		if strings.ContainsRune(got, '\\') {
+			t.Errorf("unexportedScope(%q,%q)=%q must not contain a backslash", c.path, c.name, got)
 		}
 	}
 }
