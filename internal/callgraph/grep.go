@@ -91,7 +91,9 @@ func unexportedScope(goPath, name string) string {
 	if unicode.IsUpper([]rune(name)[0]) {
 		return "" // exported — callable from any package
 	}
-	return filepath.Dir(goPath)
+	// ToSlash: git pathspecs always use '/', but filepath.Dir yields '\' on
+	// Windows — scopePathspecs would otherwise emit a mixed-separator pattern.
+	return filepath.ToSlash(filepath.Dir(goPath))
 }
 
 func gitOutput(ctx context.Context, repoDir string, runner *gitcmd.Runner, args []string) ([]byte, error) {
