@@ -8,7 +8,12 @@ type LlmComment struct {
 	ExistingCode   string `json:"existing_code,omitempty"`
 	StartLine      int    `json:"start_line"`
 	EndLine        int    `json:"end_line"`
-	Thinking       string `json:"thinking,omitempty"`
+	// UnitID is the enclosing unit (<relpath>::<symbol>) the comment lands in,
+	// resolved from the post-change file. Lets callers key review history by unit
+	// rather than by drift-prone line numbers. Empty when the line resolves to no
+	// function (or a non-Go/Python file).
+	UnitID   string `json:"unit_id,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
 	// Alias is the routing alias of the model that produced this comment (from
 	// routing.models[].alias). Lets callers compare per-model output when a multi-model
 	// pool spreads files across models (e.g. round-robin). Empty for single-model runs
