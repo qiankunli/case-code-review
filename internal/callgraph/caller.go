@@ -63,9 +63,13 @@ func (f CallerFinder) callers(funcID string) []string {
 	if name == "" {
 		return nil
 	}
+	// An unexported callee can only be called from its own package — scope the
+	// grep there so a same-named function elsewhere isn't mistaken for a caller.
+	path, _, _ := unit.SplitID(funcID)
+	scope := unexportedScope(path, name)
 	var ids []string
 	seen := map[string]bool{}
-	for _, h := range grepGo(f.RepoDir, f.Runner, []string{"-w", "-e", name}, defaultMaxResults*4) {
+	for _, h := range grepGo(f.RepoDir, f.Runner, []string{"-w", "-e", name}, defaultMaxResults*4, scope) {
 		id, ok := funcIDAt(f.RepoDir, h)
 		if !ok || id == funcID || seen[id] { // skip funcID's own definition / recursion / dupes
 			continue
