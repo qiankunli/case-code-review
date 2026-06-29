@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/qiankunli/case-code-review/internal/gitcmd"
 	"github.com/qiankunli/case-code-review/internal/unit"
@@ -24,17 +25,19 @@ type hit struct {
 	line int
 }
 
-// grepGo runs `git grep` over the repo's Go files with the given match args
-// (e.g. ["-w", "-e", name] for a word match, or ["-P", "-e", pattern] for a
-// regex) and returns up to maxHits file:line hits. Returns nil on any error so
-// finders degrade silently.
-func grepGo(repoDir string, runner *gitcmd.Runner, matchArgs []string, maxHits int) []hit {
+// grepGo runs `git grep` over the repo's Go/Python files with the given match
+// args (e.g. ["-w", "-e", name] for a word match, or ["-P", "-e", pattern] for a
+// regex) and returns up to maxHits file:line hits. When scopeDir is non-empty the
+// grep is restricted to that single package directory (see scopePathspecs).
+// Returns nil on any error so finders degrade silently.
+func grepGo(repoDir string, runner *gitcmd.Runner, matchArgs []string, maxHits int, scopeDir string) []hit {
 	ctx, cancel := context.WithTimeout(context.Background(), grepTimeout)
 	defer cancel()
 
 	args := append([]string{"--no-pager", "grep", "-n", "--no-color"}, matchArgs...)
-	// Both supported languages; funcIDAt dispatches per hit file by extension.
-	args = append(args, "--", "*.go", "*.py")
+	// funcIDAt dispatches per hit file by extension.
+	args = append(args, "--")
+	args = append(args, scopePathspecs(scopeDir)...)
 	out, err := gitOutput(ctx, repoDir, runner, args)
 	if err != nil {
 		return nil
@@ -58,6 +61,37 @@ func grepGo(repoDir string, runner *gitcmd.Runner, matchArgs []string, maxHits i
 		}
 	}
 	return hits
+}
+
+// scopePathspecs restricts the grep to one package directory when scopeDir is
+// set — an unexported Go symbol's callers/defs can only live in its own package,
+// so this kills cross-package same-name false positives. :(glob) keeps * from
+// crossing '/', so only the directory's direct files match (Go packages are
+// non-recursive). Empty scopeDir greps the whole repo (the default).
+func scopePathspecs(scopeDir string) []string {
+	switch scopeDir {
+	case "":
+		return []string{"*.go", "*.py"}
+	case ".":
+		return []string{":(glob)*.go", ":(glob)*.py"}
+	default:
+		return []string{":(glob)" + scopeDir + "/*.go", ":(glob)" + scopeDir + "/*.py"}
+	}
+}
+
+// unexportedScope returns the package directory to scope a grep to when name is
+// an UNEXPORTED Go symbol (first rune not an uppercase letter), whose callers /
+// definitions Go's visibility rules confine to that one directory. Returns ""
+// (whole-repo) for exported names, Python paths, or empty input — scoping an
+// unexported symbol is sound (there are no out-of-package references to miss).
+func unexportedScope(goPath, name string) string {
+	if name == "" || !strings.HasSuffix(goPath, ".go") {
+		return ""
+	}
+	if unicode.IsUpper([]rune(name)[0]) {
+		return "" // exported — callable from any package
+	}
+	return filepath.Dir(goPath)
 }
 
 func gitOutput(ctx context.Context, repoDir string, runner *gitcmd.Runner, args []string) ([]byte, error) {
