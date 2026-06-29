@@ -6,23 +6,23 @@ import (
 	"github.com/qiankunli/case-code-review/internal/model"
 )
 
-// fileWith builds a FileDiffUnits for path with n function diff units (ids
-// path::f0..f{n-1}), each covering one line — enough for the merger's counting.
-func fileWith(path string, n int) FileDiffUnits {
+// fileWith builds a FileFragments for path with n function fragments (each id
+// path::f), each covering one line — enough for the merger's counting.
+func fileWith(path string, n int) FileFragments {
 	d := model.Diff{NewPath: path, Diff: "@@ -1,1 +1,1 @@\n-a\n+b\n"}
-	var us []Unit
+	var fs []Fragment
 	for range n {
 		id := FuncID(path, "", "f")
-		us = append(us, Unit{ID: id, Scope: ScopeFunc, Path: path, Symbols: []string{id}, Diff: d.Diff})
+		fs = append(fs, Fragment{Path: path, Symbols: []string{id}, Diff: d.Diff})
 	}
-	return FileDiffUnits{Diff: d, Units: us}
+	return FileFragments{Diff: d, Fragments: fs}
 }
 
-func TestWatermarkMerger_UnderWatermarkKeepsDiffUnits(t *testing.T) {
+func TestWatermarkMerger_UnderWatermarkKeepsFragments(t *testing.T) {
 	m := WatermarkMerger{Watermark: 10}
-	review := m.Merge([]FileDiffUnits{fileWith("a.go", 2), fileWith("b.go", 1)})
+	review := m.Merge([]FileFragments{fileWith("a.go", 2), fileWith("b.go", 1)})
 	if len(review) != 3 {
-		t.Fatalf("under watermark: want 3 review units (diff units kept), got %d", len(review))
+		t.Fatalf("under watermark: want 3 review units (fragments kept), got %d", len(review))
 	}
 	for _, u := range review {
 		if u.Scope != ScopeFunc {
@@ -31,14 +31,14 @@ func TestWatermarkMerger_UnderWatermarkKeepsDiffUnits(t *testing.T) {
 	}
 }
 
-func TestWatermarkMerger_OverWatermarkCoalescesMultiUnitFiles(t *testing.T) {
-	// 9 single-unit files + 1 two-unit file = 11 > 10: only the multi-unit file
-	// coalesces -> 9 func review units + 1 file review unit.
-	var files []FileDiffUnits
+func TestWatermarkMerger_OverWatermarkCoalescesMultiFragmentFiles(t *testing.T) {
+	// 9 single-fragment files + 1 two-fragment file = 11 > 10: only the
+	// multi-fragment file coalesces -> 9 func review units + 1 file review unit.
+	var files []FileFragments
 	for i := range 9 {
 		files = append(files, fileWith("s.go", 1))
 		files[i].Diff.NewPath = string(rune('a'+i)) + ".go"
-		files[i].Units[0].Path = files[i].Diff.NewPath
+		files[i].Fragments[0].Path = files[i].Diff.NewPath
 	}
 	files = append(files, fileWith("multi.go", 2))
 

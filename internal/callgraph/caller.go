@@ -38,7 +38,7 @@ func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
 	}
 	// Own-spec short-circuit: a function with its own contract needs no walk —
 	// this is what keeps a widely-called utility (huge fan-in) from exploding.
-	for _, sym := range u.Symbols {
+	for _, sym := range u.AllSymbols() {
 		if e, ok := f.Index[sym]; ok && (e.Spec != "" || len(e.Cases) > 0) {
 			return nil
 		}
@@ -47,7 +47,7 @@ func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
 	if max <= 0 {
 		max = defaultMaxResults
 	}
-	return walkForSpecs(f.Index, u.Symbols, f.callers, f.Depth, max, func(id string) unit.Clue {
+	return walkForSpecs(f.Index, u.AllSymbols(), f.callers, f.Depth, max, func(id string) unit.Clue {
 		return unit.Clue{
 			Kind: unit.ClueCaller,
 			Text: "(governing spec inherited from caller " + id + ")\n" + f.Index.Render([]string{id}),

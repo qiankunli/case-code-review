@@ -36,7 +36,7 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, error)
 	for _, u := range units {
 		// Mirror reviewUnit's context assembly: clues + the path-glob rule.json.
 		specCases, specRules, seeAlso, prior := renderClues(u.Clues)
-		rule := a.resolveSystemRule(strings.ToLower(u.Path))
+		rule := a.resolveSystemRule(strings.ToLower(u.Path()))
 		if specRules != "" {
 			if rule != "" {
 				rule += "\n"
@@ -45,7 +45,7 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, error)
 		}
 		out = append(out, UnitContext{
 			ID:        u.ID,
-			Path:      u.Path,
+			Path:      u.Path(),
 			SpecCases: specCases,
 			Rules:     rule,
 			SeeAlso:   seeAlso,
