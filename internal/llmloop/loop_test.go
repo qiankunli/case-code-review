@@ -52,3 +52,24 @@ func TestExecuteToolCall_CodeCommentOverridesHallucinatedPath(t *testing.T) {
 		t.Errorf("path override: got %q, want %q", comments[0].Path, "correct.go")
 	}
 }
+
+func TestRunnerModelsUsed(t *testing.T) {
+	r := NewRunner(Deps{})
+	if got := r.ModelsUsed(); len(got) != 0 {
+		t.Errorf("fresh runner should report no models, got %v", got)
+	}
+	r.recordModel("deepseek-v4-pro")
+	r.recordModel("deepseek-v4-pro")
+	r.recordModel("seed-2.1-turbo")
+	r.recordModel("") // empty alias (single-model / non-routing) is ignored
+
+	got := r.ModelsUsed()
+	if len(got) != 2 || got["deepseek-v4-pro"] != 2 || got["seed-2.1-turbo"] != 1 {
+		t.Errorf("ModelsUsed deduped counts wrong: %v", got)
+	}
+	// returned map is a copy — mutating it must not affect the runner
+	got["deepseek-v4-pro"] = 99
+	if r.ModelsUsed()["deepseek-v4-pro"] != 2 {
+		t.Error("ModelsUsed must return a copy, not the internal map")
+	}
+}
