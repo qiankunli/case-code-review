@@ -450,7 +450,25 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 	// comments at once.
 	a.runReviewFilters(ctx)
 
-	return a.args.CommentCollector.Comments(), nil
+	comments := a.args.CommentCollector.Comments()
+	a.tagUnitIDs(comments)
+	return comments, nil
+}
+
+// tagUnitIDs resolves each comment's enclosing unit-id (<relpath>::<symbol>)
+// from the post-change file, so callers (e.g. devloop) can key review history by
+// unit instead of by drift-prone line numbers. Best-effort: a comment whose line
+// resolves to no function — or a non-Go/Python file — is left untagged.
+func (a *Agent) tagUnitIDs(comments []model.LlmComment) {
+	for i := range comments {
+		d := a.findDiff(comments[i].Path)
+		if d == nil || d.NewFileContent == "" {
+			continue
+		}
+		if id, ok := unit.FuncIDAt(comments[i].Path, d.NewFileContent, comments[i].StartLine); ok {
+			comments[i].UnitID = id
+		}
+	}
 }
 
 // runReviewFilters runs the REVIEW_FILTER_TASK once per changed file, after all
