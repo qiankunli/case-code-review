@@ -24,7 +24,7 @@
     "access": "public"
   },
   "ocrConfig": {
-    "urlPattern": "https://github.com/qiankunli/case-code-review/releases/download/v{version}/casecodereview-{os}-{arch}",
+    "urlPattern": "https://github.com/qiankunli/case-code-review/releases/download/v{version}/ccr-{os}-{arch}",
     "checksumPattern": "https://github.com/qiankunli/case-code-review/releases/download/v{version}/sha256sum.txt"
   },
   "optionalDependencies": {
