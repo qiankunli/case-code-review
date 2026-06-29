@@ -55,7 +55,10 @@ func (f CalleeFinder) callees(funcID string) []string {
 	var ids []string
 	seen := map[string]bool{}
 	for _, name := range unit.CalleesOf(path, string(src), sym) {
-		for _, id := range f.resolveDefs(name, defaultMaxResults) {
+		// An unexported callee is defined in this function's own package — scope
+		// the definition grep there so a same-named def elsewhere isn't picked.
+		scope := unexportedScope(path, name)
+		for _, id := range f.resolveDefs(name, defaultMaxResults, scope) {
 			if id == funcID || seen[id] {
 				continue
 			}
@@ -69,13 +72,13 @@ func (f CalleeFinder) callees(funcID string) []string {
 // resolveDefs greps for Go definitions of name — a free function `func name(` or
 // a method `func (recv) name(` — and resolves each to its unit-id, guarding that
 // the resolved function actually carries that name.
-func (f CalleeFinder) resolveDefs(name string, max int) []string {
+func (f CalleeFinder) resolveDefs(name string, max int, scopeDir string) []string {
 	// -P: a Go func/method (`func name(` or `func (recv) name(`) or a Python
 	// `def name(`. funcIDAt dispatches per hit file; symbolHasName guards.
 	pat := `(func(\s+|\s*\([^)]*\)\s*)|def\s+)` + name + `\s*\(`
 	var ids []string
 	seen := map[string]bool{}
-	for _, h := range grepGo(f.RepoDir, f.Runner, []string{"-P", "-e", pat}, max*4) {
+	for _, h := range grepGo(f.RepoDir, f.Runner, []string{"-P", "-e", pat}, max*4, scopeDir) {
 		id, ok := funcIDAt(f.RepoDir, h)
 		if !ok || seen[id] {
 			continue
