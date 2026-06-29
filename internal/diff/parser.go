@@ -4,7 +4,6 @@ package diff
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/qiankunli/case-code-review/internal/gitcmd"
 	"github.com/qiankunli/case-code-review/internal/model"
+	"github.com/qiankunli/case-code-review/internal/stdout"
 )
 
 var (
@@ -111,7 +111,7 @@ func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string
 			output, err = cmd.Output()
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ccr] WARNING: cannot read file %s at ref %s: %v\n",
+			fmt.Fprintf(stdout.Err(), "[ccr] WARNING: cannot read file %s at ref %s: %v\n",
 				d.NewPath, ref, err)
 			return
 		}
@@ -120,7 +120,7 @@ func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string
 	}
 	content, err := readWorkspaceFileForDiff(repoDir, d.NewPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[ccr] WARNING: cannot read file %s for review: %v\n", d.NewPath, err)
+		fmt.Fprintf(stdout.Err(), "[ccr] WARNING: cannot read file %s for review: %v\n", d.NewPath, err)
 		return
 	}
 	d.NewFileContent = string(content)

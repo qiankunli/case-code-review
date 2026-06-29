@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -205,6 +206,18 @@ func New(args Args) *Agent {
 
 // Run executes the full review pipeline: parse diffs -> plan per file -> LLM tool-loop -> collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
+	// Mirror this run's [ccr] warnings/errors into a log next to the session's
+	// JSONL transcript, so they survive a detached/background run where the
+	// terminal's stderr is gone. Best-effort: a failure here never blocks review.
+	if a.session != nil {
+		if logPath, err := a.session.LogPath(); err == nil {
+			if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+				restore := stdout.AddErrSink(f)
+				defer func() { restore(); f.Close() }()
+			}
+		}
+	}
+
 	// Step 1: Parse diffs
 	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
 	if err := a.loadDiffs(ctx); err != nil {

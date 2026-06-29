@@ -3,7 +3,6 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -102,7 +101,7 @@ func PrintToolCallFinished(toolName string, dur time.Duration) {
 // PrintToolCallError prints a line when a tool fails.
 // Example: [ccr]   ✘ file_read "internal/config/rules/loader.go" failed: permission denied
 func PrintToolCallError(toolName string, err error) {
-	fmt.Fprintf(os.Stderr, "[ccr]   ✘ %s failed: %v\n", toolName, err)
+	fmt.Fprintf(stdout.Err(), "[ccr]   ✘ %s failed: %v\n", toolName, err)
 }
 
 // summarizeArgs extracts a concise key=value summary from tool arguments for console display.
