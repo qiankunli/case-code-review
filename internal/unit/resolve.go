@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// FuncIDAt resolves a 1-indexed line to its enclosing function's unit-id,
+// FuncIDAt resolves a 1-indexed line to its enclosing function's symbol-id,
 // dispatching by file extension (.go via go/ast, .py via python3). Returns
 // ("", false) for unsupported languages or on any parse failure. This is the
 // language-agnostic entry the call-graph finders use.
@@ -36,7 +36,7 @@ func CalleesOf(path, src, symbol string) []string {
 	}
 }
 
-// GoFuncIDAt parses Go source and returns the unit-id of the function enclosing
+// GoFuncIDAt parses Go source and returns the symbol-id of the function enclosing
 // the given 1-indexed line, or ("", false) when the line is outside any function
 // or src can't be parsed. Caller resolution uses it to map a grep hit's line to
 // the function that contains the call. Go-only by construction (it reuses the

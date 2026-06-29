@@ -83,7 +83,7 @@ func TestDogfoodContextAssembly(t *testing.T) {
 
 	// The entry function gets all four of its own context paths. (A function
 	// Unit's ID is "<path>#<symbol>" — the telemetry id — distinct from the
-	// "<path>::<symbol>" unit-id used as the spec join key.)
+	// "<path>::<symbol>" symbol-id used as the spec join key.)
 	if e := got["handler.go#CreateNotebook"]; !strings.Contains(e.sc, "tenant header") ||
 		!strings.Contains(e.ru, "hot path") || !strings.Contains(e.sa, "tenancy.md") {
 		t.Errorf("entry unit missing its own spec/rule/link context: %+v", e)

@@ -17,7 +17,7 @@ const (
 	maxChainChangeLines = 300
 )
 
-// funcIDsOf collects the unit-ids of the function fragments (exactly one symbol)
+// funcIDsOf collects the symbol-ids of the function fragments (exactly one symbol)
 // across the files — the node set for call-chain adjacency.
 func funcIDsOf(files []unit.FileFragments) []string {
 	var ids []string

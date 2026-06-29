@@ -41,7 +41,7 @@ func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
 	})
 }
 
-// callees returns the unit-ids of functions that funcID calls — extract the
+// callees returns the symbol-ids of functions that funcID calls — extract the
 // callees from its body (go/ast), then resolve each name to its definition.
 func (f CalleeFinder) callees(funcID string) []string {
 	path, sym, ok := unit.SplitID(funcID)
@@ -70,7 +70,7 @@ func (f CalleeFinder) callees(funcID string) []string {
 }
 
 // resolveDefs greps for Go definitions of name — a free function `func name(` or
-// a method `func (recv) name(` — and resolves each to its unit-id, guarding that
+// a method `func (recv) name(` — and resolves each to its symbol-id, guarding that
 // the resolved function actually carries that name.
 func (f CalleeFinder) resolveDefs(name string, max int, scopeDir string) []string {
 	// -P: a Go func/method (`func name(` or `func (recv) name(`) or a Python

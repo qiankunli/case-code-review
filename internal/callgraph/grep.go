@@ -111,7 +111,7 @@ func gitOutput(ctx context.Context, repoDir string, runner *gitcmd.Runner, args 
 }
 
 // funcIDAt reads the hit's file (under repoDir) and resolves the line to the
-// unit-id of its enclosing function — dispatched by extension (Go / Python).
+// symbol-id of its enclosing function — dispatched by extension (Go / Python).
 func funcIDAt(repoDir string, h hit) (string, bool) {
 	src, err := os.ReadFile(filepath.Join(repoDir, h.file))
 	if err != nil {

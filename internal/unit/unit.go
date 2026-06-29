@@ -29,7 +29,7 @@ const (
 	ScopeCallChain Scope = "callchain"
 )
 
-// Fragment is the atom: one file's changed region. Symbols are the unit-ids
+// Fragment is the atom: one file's changed region. Symbols are the symbol-ids
 // (functions) it covers — one for a function fragment, none for a file residual,
 // several for a coalesced whole-file fragment. Pure data: a Splitter produces it,
 // a Merger groups it; it carries no context.
@@ -58,7 +58,7 @@ type Unit struct {
 	Clues []Clue
 }
 
-// AllSymbols returns every unit-id this Unit covers across its Fragments — the
+// AllSymbols returns every symbol-id this Unit covers across its Fragments — the
 // join keys for spec/case/history lookup.
 func (u Unit) AllSymbols() []string {
 	var out []string
@@ -177,11 +177,11 @@ func NewChainUnit(frags []Fragment) Unit {
 	return Unit{ID: "chain:" + strings.Join(names, "+"), Scope: ScopeCallChain, Fragments: frags}
 }
 
-// symbolName returns the bare symbol from a unit-id ("p/x.go::Svc.Get" -> "Svc.Get")
+// symbolName returns the bare symbol from a symbol-id ("p/x.go::Svc.Get" -> "Svc.Get")
 // for building a Unit ID; falls back to the whole string when it isn't an id.
-func symbolName(unitID string) string {
-	if _, sym, ok := SplitID(unitID); ok {
+func symbolName(symbolID string) string {
+	if _, sym, ok := SplitID(symbolID); ok {
 		return sym
 	}
-	return unitID
+	return symbolID
 }
