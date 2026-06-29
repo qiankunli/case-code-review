@@ -3,7 +3,8 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"os"
+
+	"github.com/qiankunli/case-code-review/internal/stdout"
 
 	"go.opentelemetry.io/otel"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -44,7 +45,7 @@ func Init(ctx context.Context) bool {
 		resource.WithHost(),
 	)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[ccr] WARNING: failed to create OTel resource: %v\n", err)
+		fmt.Fprintf(stdout.Err(), "[ccr] WARNING: failed to create OTel resource: %v\n", err)
 		res = resource.Default()
 	}
 
