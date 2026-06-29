@@ -43,11 +43,12 @@ func TestSplitUnits_CostlyFindersGatedByBudget(t *testing.T) {
 }
 
 func TestRenderClues(t *testing.T) {
-	specCases, rules, seeAlso := renderClues([]unit.Clue{
+	specCases, rules, seeAlso, prior := renderClues([]unit.Clue{
 		{Kind: unit.ClueSpec, Text: "F spec\n  - case"},
 		{Kind: unit.ClueRule, Text: "watch DB"},
 		{Kind: unit.ClueRule, Text: "hot path"},
 		{Kind: unit.ClueLink, Text: "docs/x.md (doc)"},
+		{Kind: unit.ClueHistory, Text: "prior: missing nil check"},
 	})
 	if specCases != "F spec\n  - case" {
 		t.Errorf("specCases: %q", specCases)
@@ -58,8 +59,11 @@ func TestRenderClues(t *testing.T) {
 	if seeAlso != "- docs/x.md (doc)" {
 		t.Errorf("seeAlso: %q", seeAlso)
 	}
+	if prior != "prior: missing nil check" {
+		t.Errorf("prior: %q", prior)
+	}
 
-	if s, r, l := renderClues(nil); s != "" || r != "" || l != "" {
-		t.Errorf("empty clues should render empty: %q / %q / %q", s, r, l)
+	if s, r, l, h := renderClues(nil); s != "" || r != "" || l != "" || h != "" {
+		t.Errorf("empty clues should render empty: %q / %q / %q / %q", s, r, l, h)
 	}
 }
