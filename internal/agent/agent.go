@@ -104,12 +104,12 @@ type Args struct {
 	// injected into plan and main_task prompts via {{requirement_background}}.
 	Background string
 
-	// SpecIndex is the loaded spec.json (unit-id -> spec/cases). A review Unit's
+	// SpecIndex is the loaded spec.json (symbol-id -> spec/cases). A review Unit's
 	// covered functions are looked up here and injected as the contract checklist
 	// via {{spec_cases}}. Nil when no spec.json is configured.
 	SpecIndex spec.Index
 
-	// HistoryIndex is the loaded --history (unit-id -> prior findings). A unit's
+	// HistoryIndex is the loaded --history (symbol-id -> prior findings). A unit's
 	// covered functions are looked up here and injected via {{prior_findings}} so
 	// the reviewer reconciles them with the change. Nil when no history is passed.
 	HistoryIndex history.Index
@@ -455,22 +455,22 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 	a.runReviewFilters(ctx)
 
 	comments := a.args.CommentCollector.Comments()
-	a.tagUnitIDs(comments)
+	a.tagSymbolIDs(comments)
 	return comments, nil
 }
 
-// tagUnitIDs resolves each comment's enclosing unit-id (<relpath>::<symbol>)
+// tagSymbolIDs resolves each comment's enclosing symbol-id (<relpath>::<symbol>)
 // from the post-change file, so callers (e.g. devloop) can key review history by
 // unit instead of by drift-prone line numbers. Best-effort: a comment whose line
 // resolves to no function — or a non-Go/Python file — is left untagged.
-func (a *Agent) tagUnitIDs(comments []model.LlmComment) {
+func (a *Agent) tagSymbolIDs(comments []model.LlmComment) {
 	for i := range comments {
 		d := a.findDiff(comments[i].Path)
 		if d == nil || d.NewFileContent == "" {
 			continue
 		}
 		if id, ok := unit.FuncIDAt(comments[i].Path, d.NewFileContent, comments[i].StartLine); ok {
-			comments[i].UnitID = id
+			comments[i].SymbolID = id
 		}
 	}
 }

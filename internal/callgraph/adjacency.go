@@ -3,7 +3,7 @@ package callgraph
 import "github.com/qiankunli/case-code-review/internal/gitcmd"
 
 // CallAdjacency builds the undirected call adjacency among a set of CHANGED
-// function unit-ids: an edge between X and Y whenever one directly calls the
+// function symbol-ids: an edge between X and Y whenever one directly calls the
 // other (one hop). It is the merge-time use of the call graph — "do these
 // changed functions call each other", distinct from the clue-time use ("what
 // governing spec / depended contract"). The merger groups call-adjacent changed

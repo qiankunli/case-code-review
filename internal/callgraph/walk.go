@@ -8,7 +8,7 @@ import (
 const defaultDepth = 2
 
 // neighborFunc returns the call-graph neighbors of a function (its callers, or
-// its callees) as unit-ids. CallerFinder and CalleeFinder differ only in this.
+// its callees) as symbol-ids. CallerFinder and CalleeFinder differ only in this.
 type neighborFunc func(funcID string) []string
 
 // walkForSpecs walks up to depth hops outward from start along neighborFn,

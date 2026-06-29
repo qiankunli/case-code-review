@@ -1,6 +1,6 @@
 // Package spec consumes spec.json — the generated artifact (produced by specgen
 // from +spec/+case markers) that binds a contract and its cases to a code
-// symbol by unit-id. ccr injects the matching spec/case as the review's
+// symbol by symbol-id. ccr injects the matching spec/case as the review's
 // contract checklist: the change must be shown not to break it.
 package spec
 
@@ -34,7 +34,7 @@ type Entry struct {
 	Rules []string `json:"rules,omitempty"`
 }
 
-// Index is spec.json: unit-id (<relpath>::<symbol>) -> Entry.
+// Index is spec.json: symbol-id (<relpath>::<symbol>) -> Entry.
 type Index map[string]Entry
 
 // Parse decodes spec.json bytes.
@@ -49,11 +49,11 @@ func Parse(data []byte) (Index, error) {
 // Load reads spec.json from the priority chain and merges the layers, mirroring
 // how review rules are loaded:
 //
-//	1. customPath (--spec)        — highest
-//	2. <repoDir>/.casecodereview/spec.json   — project
-//	3. ~/.casecodereview/spec.json           — global (lowest)
+//  1. customPath (--spec)        — highest
+//  2. <repoDir>/.casecodereview/spec.json   — project
+//  3. ~/.casecodereview/spec.json           — global (lowest)
 //
-// Higher layers override same-keyed (unit-id) entries. Project/global layers are
+// Higher layers override same-keyed (symbol-id) entries. Project/global layers are
 // optional (skipped if absent); a non-empty customPath that is missing is an
 // error. Returns a nil Index if no layer exists.
 func Load(repoDir, customPath string) (Index, error) {

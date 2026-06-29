@@ -21,12 +21,12 @@ import (
 // as the agent's splitter.
 type GoFuncSplitter struct{}
 
-// funcSpan is one function's line range and unit-id in the new file. Its source
+// funcSpan is one function's line range and symbol-id in the new file. Its source
 // is the only thing that differs between splitters: GoFuncSplitter computes it
 // from go/ast, IndexSplitter reads it from an externally-produced func-index.
 type funcSpan struct {
 	start, end int    // 1-indexed line range in the new file, inclusive
-	id         string // the function's unit-id (FuncID)
+	id         string // the function's symbol-id (FuncID)
 }
 
 func (GoFuncSplitter) Split(d model.Diff) ([]Fragment, error) {

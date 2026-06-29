@@ -56,7 +56,7 @@ func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
 	})
 }
 
-// callers returns the unit-ids of functions that call funcID — git grep the
+// callers returns the symbol-ids of functions that call funcID — git grep the
 // function's name, then resolve each call site to its enclosing function.
 func (f CallerFinder) callers(funcID string) []string {
 	name := funcName(funcID)
@@ -80,10 +80,10 @@ func (f CallerFinder) callers(funcID string) []string {
 	return ids
 }
 
-// funcName returns the bare function/method name from a unit-id, for grepping:
+// funcName returns the bare function/method name from a symbol-id, for grepping:
 // "pkg/x.go::Service.Get" -> "Get", "pkg/x.go::Helper" -> "Helper".
-func funcName(unitID string) string {
-	_, symbol, ok := unit.SplitID(unitID)
+func funcName(symbolID string) string {
+	_, symbol, ok := unit.SplitID(symbolID)
 	if !ok {
 		return ""
 	}
