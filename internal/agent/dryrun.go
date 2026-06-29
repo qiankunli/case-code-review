@@ -16,18 +16,19 @@ type UnitContext struct {
 	SeeAlso   string // curated @link pointers
 }
 
-// DryRunContext loads diffs, splits into review units, runs the context finders,
-// and returns each unit's assembled context — with no LLM call. It is the engine
-// behind `ccr review --dry-run`: it shows exactly what each unit's review would
-// see (spec/case/rule/link + caller/callee), so spec.json coverage and the
-// call-graph resolution can be inspected for free.
-func (a *Agent) DryRunContext(ctx context.Context) ([]UnitContext, error) {
+// DryRun loads diffs once and returns the complete no-LLM view behind
+// `ccr review --dry-run`: the file-selection preview (which files are reviewed /
+// excluded — the `--preview` subset) plus each review unit's assembled context
+// (spec/case/rule/link + caller/callee). So both file filtering and spec.json /
+// call-graph coverage can be inspected in one pass, for free.
+func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, error) {
 	if err := a.loadDiffs(ctx); err != nil {
-		return nil, fmt.Errorf("load diffs: %w", err)
+		return nil, nil, fmt.Errorf("load diffs: %w", err)
 	}
+	preview := a.buildPreview()
 	units, err := a.splitUnits()
 	if err != nil {
-		return nil, fmt.Errorf("split units: %w", err)
+		return nil, nil, fmt.Errorf("split units: %w", err)
 	}
 
 	out := make([]UnitContext, 0, len(units))
@@ -49,5 +50,5 @@ func (a *Agent) DryRunContext(ctx context.Context) ([]UnitContext, error) {
 			SeeAlso:   seeAlso,
 		})
 	}
-	return out, nil
+	return preview, out, nil
 }

@@ -212,11 +212,12 @@ func runDryRun(cc *commonContext, opts reviewOptions) error {
 		Background: opts.background,
 	})
 
-	units, err := ag.DryRunContext(context.Background())
+	preview, units, err := ag.DryRun(context.Background())
 	if err != nil {
 		return fmt.Errorf("dry-run failed: %w", err)
 	}
-	outputDryRunText(units)
+	outputPreviewText(preview) // which files are reviewed/excluded (the --preview view)
+	outputDryRunText(units)    // each unit's assembled context
 	return nil
 }
 
