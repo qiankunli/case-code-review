@@ -23,6 +23,10 @@ The contract and cases bound to the changed function(s). Treat them as invariant
 References the author flagged as relevant when changing these function(s) — consult them, fetching content as needed (a bare path is a doc; `<path>::<symbol>` is another function). If empty, none were flagged.
 {{see_also}}
 
+### Prior Review (Optional)
+Findings a previous review raised on these function(s). For each, check whether the current code now addresses it: if fixed, note it briefly; if still present, re-raise it; do not re-flag what is already resolved. If empty, there is no prior review to reconcile.
+{{prior_findings}}
+
 ### Review Checklist
 {{system_rule}}
 
