@@ -17,7 +17,7 @@
 case-code-review/
 ├── cmd/ccr/        CLI 入口：review/scan/config/… 子命令；组装 Args、加载 spec.json
 └── internal/
-    ├── unit/       ★ Unit 两阶段（Splitter→diff unit：Go go/ast、Python python3；Merger→review unit：WatermarkMerger 归并）+ context 抽象 Clue / ClueFinder / Unit.Clues
+    ├── unit/       ★ 两类型两阶段：`Fragment`（原子，Splitter 产：Go go/ast、Python python3）→ Merger 归并成 `Unit`（评审作用域，WatermarkMerger）；context 抽象 Clue / ClueFinder（merge 后挂 `Unit.Clues`）。详见 `docs/unit-model.md`
     ├── spec/       ★ 消费 spec.json：SpecFinder/RuleFinder/LinkFinder 把 spec/case/rule/link 找成 Clue（廉价 finder）
     ├── history/    ★ 消费 --history（上轮评审 findings，unit-id keyed）：Finder 挂成 ClueHistory，渲染成"核验是否已修"的 prompt（廉价 finder；评审反馈闭环的消费侧）
     ├── callgraph/  ★ caller/callee 邻域上下文（昂贵 finder）：CallerFinder（上溯 governing spec）/ CalleeFinder（下探依赖契约），共享有界 walk（深度 2、每分支停在最近带 spec 的邻居），git grep + go/ast / python3，Go+Python
@@ -31,12 +31,12 @@ case-code-review/
 **主链路**：
 
 ```
-diff ─Splitter─▶ diff unit ─ClueFinder 找 Clue(spec/case/rule/link + caller/callee)─▶ Merger(并 Clue) ─▶ review unit ─▶ review loop
+diff ─Splitter─▶ Fragment ─Merger─▶ Unit ─ClueFinder 找 Clue(spec/case/rule/link + caller/callee)─▶ review loop
 ```
 
-> 即：从 diff 切出 diff unit → 各 ClueFinder 为它找 Clue（挂到 `Unit.Clues`：spec/case/rule/link 廉价直查；caller/callee 经 call-graph 上溯/下探，深度 2、Go+Python）→ 归并成 review unit（成员 Clue 取并集）→ 一个 review unit 一个 review loop。
+> 即：Splitter 把每个文件 diff 切成 `Fragment`（一函数一个 + 残余）→ Merger 归并成 `Unit`（评审作用域）→ 各 ClueFinder **对 Unit** 找 Clue 挂到 `Unit.Clues`（spec/case/rule/link 廉价直查；caller/callee 经 call-graph 上溯/下探，深度 2、Go+Python）→ 一个 Unit 一个 review loop。context 后置（对最终作用域收一次）。
 >
-> **Clue / ClueFinder**：context 抽象的三件——找的动作（`ClueFinder.Find(u) []Clue`）、找的结果（`Clue{Kind, Text, Ref}`，Text 内联 / Ref 按需指针）、挂哪（`Unit.Clues`）。这个抽象兑现了：CallerFinder/CalleeFinder 就是各加一个 finder 接进来的，主链路一行没动。
+> **Clue / ClueFinder**：context 抽象的三件——找的动作（`ClueFinder.Find(u Unit) []Clue`，对评审作用域 Unit 找）、找的结果（`Clue{Kind, Text, Ref}`，Text 内联 / Ref 按需指针）、挂哪（`Unit.Clues`，merge 后收）。加一类 context = 加一个 finder，不动主链路。
 
 ## 关键约定（核心四条）
 

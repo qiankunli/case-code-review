@@ -29,7 +29,7 @@ type funcSpan struct {
 	id         string // the function's unit-id (FuncID)
 }
 
-func (GoFuncSplitter) Split(d model.Diff) ([]Unit, error) {
+func (GoFuncSplitter) Split(d model.Diff) ([]Fragment, error) {
 	if !strings.HasSuffix(d.NewPath, ".go") || d.NewFileContent == "" {
 		return FileSplitter{}.Split(d)
 	}
@@ -47,7 +47,7 @@ func (GoFuncSplitter) Split(d model.Diff) ([]Unit, error) {
 // the language-agnostic core shared by GoFuncSplitter (spans from go/ast) and
 // IndexSplitter (spans from a func-index). Falls back to a single file Unit when
 // nothing is attributed (e.g. all hunks are pure deletions past EOF).
-func splitByFuncSpans(d model.Diff, spans []funcSpan) []Unit {
+func splitByFuncSpans(d model.Diff, spans []funcSpan) []Fragment {
 	header := diffHeader(d.Diff)
 	hunks := diff.ParseHunks(d.Diff)
 
@@ -57,17 +57,15 @@ func splitByFuncSpans(d model.Diff, spans []funcSpan) []Unit {
 		grouped[funcOfHunk(h, spans)] = append(grouped[funcOfHunk(h, spans)], h)
 	}
 
-	var units []Unit
-	// Func units, in span order so output is stable.
+	var frags []Fragment
+	// Func fragments, in span order so output is stable.
 	for i := range spans {
 		hs := grouped[i]
 		if len(hs) == 0 {
 			continue
 		}
 		ins, del := countChanges(hs)
-		units = append(units, Unit{
-			ID:         spans[i].id,
-			Scope:      ScopeFunc,
+		frags = append(frags, Fragment{
 			Path:       d.NewPath,
 			Symbols:    []string{spans[i].id},
 			Diff:       header + renderHunks(hs),
@@ -75,12 +73,10 @@ func splitByFuncSpans(d model.Diff, spans []funcSpan) []Unit {
 			Deletions:  del,
 		})
 	}
-	// Residual: changes outside any function.
+	// Residual: changes outside any function (no symbol).
 	if hs := grouped[-1]; len(hs) > 0 {
 		ins, del := countChanges(hs)
-		units = append(units, Unit{
-			ID:         d.NewPath,
-			Scope:      ScopeFile,
+		frags = append(frags, Fragment{
 			Path:       d.NewPath,
 			Diff:       header + renderHunks(hs),
 			Insertions: ins,
@@ -88,11 +84,11 @@ func splitByFuncSpans(d model.Diff, spans []funcSpan) []Unit {
 		})
 	}
 
-	if len(units) == 0 {
+	if len(frags) == 0 {
 		fu, _ := FileSplitter{}.Split(d)
 		return fu
 	}
-	return units
+	return frags
 }
 
 // parseGoFuncs returns the line spans of every top-level func/method declaration.

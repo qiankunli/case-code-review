@@ -19,7 +19,7 @@ func TestFinders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u := unit.Unit{Symbols: []string{"a.go::Foo"}}
+	u := unit.UnitOf(unit.Fragment{Path: "a.go", Symbols: []string{"a.go::Foo"}})
 
 	spec := SpecFinder{Index: idx}.Find(u)
 	if len(spec) != 1 || spec[0].Kind != unit.ClueSpec || !strings.Contains(spec[0].Text, "tenant-scoped") {
@@ -40,7 +40,7 @@ func TestFinders(t *testing.T) {
 
 func TestFindersNilAndUnknownSafe(t *testing.T) {
 	var nilIdx Index
-	u := unit.Unit{Symbols: []string{"x::Unknown"}}
+	u := unit.UnitOf(unit.Fragment{Path: "x", Symbols: []string{"x::Unknown"}})
 	for _, f := range []unit.ClueFinder{SpecFinder{nilIdx}, RuleFinder{nilIdx}, LinkFinder{nilIdx}} {
 		if got := f.Find(u); got != nil {
 			t.Errorf("nil index should find nothing, got %+v", got)

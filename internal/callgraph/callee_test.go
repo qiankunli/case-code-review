@@ -19,7 +19,7 @@ func TestCalleeFinder_DependsOnCalleeSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	u := unit.Unit{Scope: unit.ScopeFunc, Path: "svc.go", Symbols: []string{"svc.go::Svc.Create"}}
+	u := unit.UnitOf(unit.Fragment{Path: "svc.go", Symbols: []string{"svc.go::Svc.Create"}})
 	clues := CalleeFinder{RepoDir: repo, Index: idx}.Find(u)
 
 	if len(clues) != 1 {
@@ -32,12 +32,12 @@ func TestCalleeFinder_DependsOnCalleeSpec(t *testing.T) {
 }
 
 func TestCalleeFinder_Degrades(t *testing.T) {
-	u := unit.Unit{Scope: unit.ScopeFunc, Symbols: []string{"a.go::f"}}
+	u := unit.UnitOf(unit.Fragment{Path: "a.go", Symbols: []string{"a.go::f"}})
 	if got := (CalleeFinder{}).Find(u); got != nil {
 		t.Errorf("no repo/index should degrade to nil, got %+v", got)
 	}
 	idx, _ := spec.Parse([]byte(`{"x.go::v": {"spec": "s"}}`))
-	file := unit.Unit{Scope: unit.ScopeFile, Path: "a.go"}
+	file := unit.UnitOf(unit.Fragment{Path: "a.go"})
 	if got := (CalleeFinder{RepoDir: t.TempDir(), Index: idx}).Find(file); got != nil {
 		t.Errorf("file-scope unit should degrade to nil, got %+v", got)
 	}

@@ -6,23 +6,27 @@ import (
 	"github.com/qiankunli/case-code-review/internal/model"
 )
 
-func TestCoalesceFileUnionsAndDedupsClues(t *testing.T) {
+// CoalesceFile is the cost governor's function→file rung: it merges a file's
+// Fragments into one whole-file Unit, retaining every Fragment's symbols so spec
+// context survives coarsening.
+//
+// Clue UNION is no longer CoalesceFile's job — clues are gathered post-merge, on
+// the coalesced Unit's AllSymbols (the agent's findClues stage), not on each
+// Fragment then unioned. So this test asserts the symbol union only; the
+// post-merge clue gathering is covered by the agent package.
+func TestCoalesceFileUnionsSymbols(t *testing.T) {
 	d := model.Diff{NewPath: "a.go", Diff: "@@ -1 +1 @@\n-a\n+b\n"}
-	m1 := Unit{Path: "a.go", Symbols: []string{"a.go::F1"}, Clues: []Clue{
-		{Kind: ClueRule, Text: "shared"}, // identical to m2's -> deduped
-		{Kind: ClueSpec, Text: "F1 spec"},
-	}}
-	m2 := Unit{Path: "a.go", Symbols: []string{"a.go::F2"}, Clues: []Clue{
-		{Kind: ClueRule, Text: "shared"},
-		{Kind: ClueSpec, Text: "F2 spec"},
-	}}
+	f1 := Fragment{Path: "a.go", Symbols: []string{"a.go::F1"}}
+	f2 := Fragment{Path: "a.go", Symbols: []string{"a.go::F2"}}
 
-	merged := CoalesceFile(d, []Unit{m1, m2})
-	if len(merged.Symbols) != 2 {
-		t.Errorf("want both symbols retained, got %v", merged.Symbols)
+	merged := CoalesceFile(d, []Fragment{f1, f2})
+	if merged.Scope != ScopeFile {
+		t.Errorf("coalesced unit should be file scope, got %v", merged.Scope)
 	}
-	// shared rule once + F1 spec + F2 spec = 3
-	if len(merged.Clues) != 3 {
-		t.Fatalf("want 3 unioned/deduped clues, got %d: %+v", len(merged.Clues), merged.Clues)
+	if got := merged.AllSymbols(); len(got) != 2 {
+		t.Errorf("want both symbols retained, got %v", got)
+	}
+	if merged.Diff() != d.Diff {
+		t.Errorf("coalesced unit should review the whole-file diff, got %q", merged.Diff())
 	}
 }

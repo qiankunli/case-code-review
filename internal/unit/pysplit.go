@@ -42,7 +42,7 @@ json.dump(out, sys.stdout)
 // python3, or a syntax error — so it is always safe to use.
 type PyFuncSplitter struct{}
 
-func (PyFuncSplitter) Split(d model.Diff) ([]Unit, error) {
+func (PyFuncSplitter) Split(d model.Diff) ([]Fragment, error) {
 	if !strings.HasSuffix(d.NewPath, ".py") || d.NewFileContent == "" {
 		return FileSplitter{}.Split(d)
 	}
