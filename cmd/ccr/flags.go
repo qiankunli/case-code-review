@@ -137,8 +137,8 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-6)")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
-	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")
-	a.BoolVar(&opts.dryRun, "dry-run", false, "assemble and print each review unit's context (spec/case/rule/link + caller/callee) without running the LLM")
+	a.BoolVarP(&opts.preview, "preview", "p", false, "no-LLM, file level: list which files will be reviewed")
+	a.BoolVar(&opts.dryRun, "dry-run", false, "no-LLM, full view: the --preview file list plus each review unit's assembled context (spec/case/rule/link + caller/callee)")
 
 	if err := a.Parse(args); err != nil {
 		return opts, fmt.Errorf("parse flags: %w", err)
@@ -218,7 +218,7 @@ Examples:
   ccr review --preview
   ccr review -c abc123 -p
 
-  # Print each unit's assembled context (spec/case/rule/link + caller/callee), no LLM
+  # Full no-LLM view: the --preview file list + each unit's assembled context
   ccr review --dry-run
 
   # Inject contract context from a spec.json (specgen output; also auto-loaded from .casecodereview/spec.json)
@@ -234,8 +234,8 @@ Flags:
   --from string           source ref to start diff from (e.g., 'main')
   --max-tools int         max tool call rounds per file (0 = template default; min 10)
   --model string          override LLM model for this review (e.g., claude-opus-4-6)
-  -p, --preview           preview which files will be reviewed without running the LLM
-  --dry-run               assemble and print each review unit's context (spec/case/rule/link + caller/callee) without running the LLM
+  -p, --preview           no-LLM, file level: list which files will be reviewed
+  --dry-run               no-LLM, full view: the --preview file list plus each review unit's assembled context (spec/case/rule/link + caller/callee)
   --repo string           root directory of the git repository (default: current dir)
   --rule string           path to JSON file with system review rules
   --spec string           path to spec.json (specgen output); also auto-loaded from .casecodereview/spec.json

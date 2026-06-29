@@ -62,7 +62,13 @@ func (a *Agent) Preview(ctx context.Context) (*DiffPreview, error) {
 	if err := a.loadDiffs(ctx); err != nil {
 		return nil, fmt.Errorf("load diffs: %w", err)
 	}
+	return a.buildPreview(), nil
+}
 
+// buildPreview turns the already-loaded diffs into preview data (no I/O), so a
+// caller that has loaded diffs once (e.g. DryRun) can reuse it without re-parsing
+// — loadDiffs accumulates totals, so calling it twice would double-count.
+func (a *Agent) buildPreview() *DiffPreview {
 	result := &DiffPreview{
 		TotalInsertions: a.totalInsertions,
 		TotalDeletions:  a.totalDeletions,
@@ -95,7 +101,7 @@ func (a *Agent) Preview(ctx context.Context) (*DiffPreview, error) {
 		result.Entries = append(result.Entries, entry)
 	}
 
-	return result, nil
+	return result
 }
 
 func effectivePath(d model.Diff) string {
