@@ -46,6 +46,59 @@ func TestCallerFinder_InheritsSpecFromCaller(t *testing.T) {
 	}
 }
 
+func TestCallerFinder_ScopesUnexportedToPackage(t *testing.T) {
+	// Two packages each define an unexported helper() called by a local handler.
+	// Walking callers of a/helper must NOT reach b's handler — Go confines an
+	// unexported helper's callers to its own package, so the spec inherited must
+	// be a's, never b's same-named-helper caller.
+	repo := newRepo(t, map[string]string{
+		"a/handler.go": "package a\n\nfunc Handle() { helper() }\n",
+		"a/helper.go":  "package a\n\nfunc helper() {}\n",
+		"b/handler.go": "package b\n\nfunc OtherHandle() { helper() }\n",
+		"b/helper.go":  "package b\n\nfunc helper() {}\n",
+	})
+	idx, err := spec.Parse([]byte(`{
+		"a/handler.go::Handle": {"spec": "spec-A"},
+		"b/handler.go::OtherHandle": {"spec": "spec-B"}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	u := unit.Unit{Scope: unit.ScopeFunc, Path: "a/helper.go", Symbols: []string{"a/helper.go::helper"}}
+	clues := CallerFinder{RepoDir: repo, Index: idx}.Find(u)
+
+	if len(clues) != 1 {
+		t.Fatalf("want exactly 1 same-package caller clue, got %d: %+v", len(clues), clues)
+	}
+	if clues[0].Ref != "a/handler.go::Handle" || !strings.Contains(clues[0].Text, "spec-A") {
+		t.Errorf("should inherit package a's spec, got %+v", clues[0])
+	}
+	if strings.Contains(clues[0].Text, "spec-B") {
+		t.Error("must not cross into package b's same-named helper caller")
+	}
+}
+
+func TestUnexportedScope(t *testing.T) {
+	cases := []struct{ path, name, want string }{
+		{"internal/foo/x.go", "helper", "internal/foo"}, // unexported Go -> its package dir
+		{"internal/foo/x.go", "Helper", ""},             // exported -> whole repo
+		{"x.go", "helper", "."},                         // root-level package
+		{"mod/x.py", "helper", ""},                      // Python -> no scoping
+		{"x.go", "", ""},                                // empty name
+	}
+	for _, c := range cases {
+		got := unexportedScope(c.path, c.name)
+		if got != c.want {
+			t.Errorf("unexportedScope(%q,%q)=%q want %q", c.path, c.name, got, c.want)
+		}
+		// git pathspecs are always '/'-separated, even on Windows.
+		if strings.ContainsRune(got, '\\') {
+			t.Errorf("unexportedScope(%q,%q)=%q must not contain a backslash", c.path, c.name, got)
+		}
+	}
+}
+
 func TestCallerFinder_OwnSpecShortCircuits(t *testing.T) {
 	idx, _ := spec.Parse([]byte(`{"helper.go::helper": {"spec": "own contract"}}`))
 	// Own spec present -> no walk at all (no repo needed).
