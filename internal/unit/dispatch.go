@@ -13,7 +13,7 @@ import (
 // always safe.
 type AutoSplitter struct{}
 
-func (AutoSplitter) Split(d model.Diff) ([]Unit, error) {
+func (AutoSplitter) Split(d model.Diff) ([]Fragment, error) {
 	switch {
 	case strings.HasSuffix(d.NewPath, ".go"):
 		return GoFuncSplitter{}.Split(d)

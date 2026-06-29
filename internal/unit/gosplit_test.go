@@ -7,24 +7,34 @@ import (
 	"github.com/qiankunli/case-code-review/internal/model"
 )
 
-// findUnit returns the unit with the given ID, or fails.
-func findUnit(t *testing.T, units []Unit, id string) Unit {
-	t.Helper()
-	for _, u := range units {
-		if u.ID == id {
-			return u
-		}
+// fragID is the unit-id a fragment represents: its sole symbol for a function
+// fragment, or its path for a residual/whole-file fragment.
+func fragID(f Fragment) string {
+	if len(f.Symbols) >= 1 {
+		return f.Symbols[0]
 	}
-	t.Fatalf("no unit with id %q; got %v", id, ids(units))
-	return Unit{}
+	return f.Path
 }
 
-func ids(units []Unit) []string {
-	out := make([]string, len(units))
-	for i, u := range units {
-		out[i] = u.ID
+func ids(frags []Fragment) []string {
+	out := make([]string, len(frags))
+	for i, f := range frags {
+		out[i] = fragID(f)
 	}
 	return out
+}
+
+// findFrag returns the fragment with the given unit-id (or path, for the
+// residual), or fails.
+func findFrag(t *testing.T, frags []Fragment, id string) Fragment {
+	t.Helper()
+	for _, f := range frags {
+		if fragID(f) == id {
+			return f
+		}
+	}
+	t.Fatalf("no fragment with id %q; got %v", id, ids(frags))
+	return Fragment{}
 }
 
 func TestGoFuncSplitter_ByFunction(t *testing.T) {
@@ -54,18 +64,18 @@ func Beta(x int) int {
 +	return x + 1
  }
 `
-	units, err := GoFuncSplitter{}.Split(model.Diff{NewPath: "foo.go", Diff: rawDiff, NewFileContent: src})
+	frags, err := GoFuncSplitter{}.Split(model.Diff{NewPath: "foo.go", Diff: rawDiff, NewFileContent: src})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 2 {
-		t.Fatalf("want 2 func units, got %d: %v", len(units), ids(units))
+	if len(frags) != 2 {
+		t.Fatalf("want 2 func fragments, got %d: %v", len(frags), ids(frags))
 	}
 
-	alpha := findUnit(t, units, "foo.go::Alpha")
-	if alpha.Scope != ScopeFunc || alpha.Path != "foo.go" ||
+	alpha := findFrag(t, frags, "foo.go::Alpha")
+	if UnitOf(alpha).Scope != ScopeFunc || alpha.Path != "foo.go" ||
 		len(alpha.Symbols) != 1 || alpha.Symbols[0] != "foo.go::Alpha" {
-		t.Errorf("alpha unit fields off: %+v", alpha)
+		t.Errorf("alpha fragment fields off: %+v", alpha)
 	}
 	if alpha.Insertions != 1 || alpha.Deletions != 1 {
 		t.Errorf("alpha counts: +%d/-%d, want +1/-1", alpha.Insertions, alpha.Deletions)
@@ -74,7 +84,7 @@ func Beta(x int) int {
 		t.Errorf("alpha diff should slice only Alpha's hunk:\n%s", alpha.Diff)
 	}
 
-	beta := findUnit(t, units, "foo.go::Beta")
+	beta := findFrag(t, frags, "foo.go::Beta")
 	if beta.Insertions != 1 || beta.Deletions != 1 {
 		t.Errorf("beta counts: +%d/-%d", beta.Insertions, beta.Deletions)
 	}
@@ -107,29 +117,32 @@ func (s *Service) Do() error {
 +	return errors.New("x")
  }
 `
-	units, err := GoFuncSplitter{}.Split(model.Diff{NewPath: "foo.go", Diff: rawDiff, NewFileContent: src})
+	frags, err := GoFuncSplitter{}.Split(model.Diff{NewPath: "foo.go", Diff: rawDiff, NewFileContent: src})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 2 {
-		t.Fatalf("want 1 method + 1 residual, got %d: %v", len(units), ids(units))
+	if len(frags) != 2 {
+		t.Fatalf("want 1 method + 1 residual, got %d: %v", len(frags), ids(frags))
 	}
 
 	// pointer receiver stripped to "Service"
-	m := findUnit(t, units, "foo.go::Service.Do")
-	if m.Scope != ScopeFunc {
-		t.Errorf("method unit scope: %v", m.Scope)
+	m := findFrag(t, frags, "foo.go::Service.Do")
+	if UnitOf(m).Scope != ScopeFunc {
+		t.Errorf("method fragment should map to func scope, got %v", UnitOf(m).Scope)
 	}
 
-	// residual is the file-scope unit carrying the import hunk
-	var residual *Unit
-	for i := range units {
-		if units[i].Scope == ScopeFile {
-			residual = &units[i]
+	// residual is the symbol-less fragment (maps to file scope) carrying the import hunk
+	var residual *Fragment
+	for i := range frags {
+		if len(frags[i].Symbols) == 0 {
+			residual = &frags[i]
 		}
 	}
 	if residual == nil {
-		t.Fatal("expected a residual file unit for the import change")
+		t.Fatal("expected a residual (symbol-less) fragment for the import change")
+	}
+	if UnitOf(*residual).Scope != ScopeFile {
+		t.Errorf("residual should map to file scope, got %v", UnitOf(*residual).Scope)
 	}
 	if !strings.Contains(residual.Diff, "errors") || strings.Contains(residual.Diff, "return") {
 		t.Errorf("residual should hold only the import hunk:\n%s", residual.Diff)
@@ -137,7 +150,7 @@ func (s *Service) Do() error {
 }
 
 func TestGoFuncSplitter_FallsBackOnParseError(t *testing.T) {
-	units, err := GoFuncSplitter{}.Split(model.Diff{
+	frags, err := GoFuncSplitter{}.Split(model.Diff{
 		NewPath:        "bad.go",
 		Diff:           "@@ -1,1 +1,1 @@\n-x\n+y\n",
 		NewFileContent: "package foo\nthis is not valid go",
@@ -145,13 +158,13 @@ func TestGoFuncSplitter_FallsBackOnParseError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 1 || units[0].Scope != ScopeFile {
-		t.Fatalf("parse error should fall back to one file unit, got %v", ids(units))
+	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFile {
+		t.Fatalf("parse error should fall back to one file fragment, got %v", ids(frags))
 	}
 }
 
 func TestGoFuncSplitter_NonGoIsFileScope(t *testing.T) {
-	units, err := GoFuncSplitter{}.Split(model.Diff{
+	frags, err := GoFuncSplitter{}.Split(model.Diff{
 		NewPath:        "app/api.py",
 		Diff:           "@@ -1,1 +1,1 @@\n-x\n+y\n",
 		NewFileContent: "def f(): pass",
@@ -159,7 +172,7 @@ func TestGoFuncSplitter_NonGoIsFileScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 1 || units[0].Scope != ScopeFile {
-		t.Fatalf("non-go should be one file unit, got %v", ids(units))
+	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFile {
+		t.Fatalf("non-go should be one file fragment, got %v", ids(frags))
 	}
 }

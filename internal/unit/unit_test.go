@@ -6,7 +6,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/model"
 )
 
-func TestFileSplitter_OneUnitPerFile(t *testing.T) {
+func TestFileSplitter_OneFragmentPerFile(t *testing.T) {
 	d := model.Diff{
 		NewPath:    "internal/foo/bar.go",
 		Diff:       "@@ -1,2 +1,3 @@\n+added line\n",
@@ -14,29 +14,30 @@ func TestFileSplitter_OneUnitPerFile(t *testing.T) {
 		Deletions:  0,
 	}
 
-	units, err := FileSplitter{}.Split(d)
+	frags, err := FileSplitter{}.Split(d)
 	if err != nil {
 		t.Fatalf("Split: %v", err)
 	}
-	if len(units) != 1 {
-		t.Fatalf("expected 1 unit, got %d", len(units))
+	if len(frags) != 1 {
+		t.Fatalf("expected 1 fragment, got %d", len(frags))
 	}
 
-	u := units[0]
+	f := frags[0]
+	u := UnitOf(f) // whole-file fragment -> file-scope Unit (ID = path)
 	if u.Scope != ScopeFile {
 		t.Errorf("scope: got %q, want %q", u.Scope, ScopeFile)
 	}
-	if u.ID != d.NewPath || u.Path != d.NewPath {
-		t.Errorf("identity: ID=%q Path=%q, want both %q", u.ID, u.Path, d.NewPath)
+	if u.ID != d.NewPath || f.Path != d.NewPath {
+		t.Errorf("identity: ID=%q Path=%q, want both %q", u.ID, f.Path, d.NewPath)
 	}
-	if len(u.Symbols) != 0 {
-		t.Errorf("file-scope unit should cover no functions, got Symbols %v", u.Symbols)
+	if len(f.Symbols) != 0 {
+		t.Errorf("file-scope fragment should cover no functions, got Symbols %v", f.Symbols)
 	}
-	if u.Diff != d.Diff {
-		t.Errorf("Diff: got %q, want whole-file diff %q", u.Diff, d.Diff)
+	if f.Diff != d.Diff {
+		t.Errorf("Diff: got %q, want whole-file diff %q", f.Diff, d.Diff)
 	}
-	if u.Insertions != d.Insertions || u.Deletions != d.Deletions {
+	if f.Insertions != d.Insertions || f.Deletions != d.Deletions {
 		t.Errorf("counts: got +%d/-%d, want +%d/-%d (file's own)",
-			u.Insertions, u.Deletions, d.Insertions, d.Deletions)
+			f.Insertions, f.Deletions, d.Insertions, d.Deletions)
 	}
 }

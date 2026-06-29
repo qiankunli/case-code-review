@@ -43,7 +43,7 @@ func TestLoad(t *testing.T) {
 func TestFinder(t *testing.T) {
 	idx := Index{"a.go::F": {{Msg: "missing nil check", Sha: "abc1234"}}}
 
-	u := unit.Unit{Scope: unit.ScopeFunc, Path: "a.go", Symbols: []string{"a.go::F"}}
+	u := unit.UnitOf(unit.Fragment{Path: "a.go", Symbols: []string{"a.go::F"}})
 	clues := Finder{Index: idx}.Find(u)
 	if len(clues) != 1 || clues[0].Kind != unit.ClueHistory {
 		t.Fatalf("want 1 history clue, got %+v", clues)
@@ -56,7 +56,7 @@ func TestFinder(t *testing.T) {
 	}
 
 	// a unit with no prior findings -> nil
-	other := unit.Unit{Symbols: []string{"a.go::G"}}
+	other := unit.UnitOf(unit.Fragment{Path: "a.go", Symbols: []string{"a.go::G"}})
 	if got := (Finder{Index: idx}).Find(other); got != nil {
 		t.Errorf("no findings -> nil, got %+v", got)
 	}
