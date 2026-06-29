@@ -530,20 +530,33 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 		total += len(frags)
 	}
 
-	// Stage 2 — merge: Fragments → review Units (coalesced up the ladder when too many).
 	merger := a.merger
 	if merger == nil {
 		merger = unit.WatermarkMerger{Watermark: defaultUnitWatermark}
 	}
-	units := merger.Merge(files)
+
+	// Stage 2 — merge along two axes:
+	//   - call-chain (semantic): group call-adjacent changed functions across files
+	//     into one Unit — a requirement's change reviewed along its call chain.
+	//   - file-coalesce (cost): coarsen the residual when there are still too many.
+	// Call-chain adjacency is costly (call-graph greps), so it runs only in the
+	// function-grained regime (≤ watermark); above it a change is large enough that
+	// we skip straight to cost coarsening (the same gate as the costly finders).
+	costly := total <= defaultUnitWatermark
+	var units []unit.Unit
+	if costly {
+		adj := callgraph.CallAdjacency(a.args.RepoDir, a.args.GitRunner, funcIDsOf(files))
+		chains, residual := clusterByCallChain(files, adj)
+		units = append(units, chains...)
+		units = append(units, merger.Merge(residual)...)
+	} else {
+		units = merger.Merge(files)
+	}
 
 	// Stage 3 — find context: fill each review Unit's Clues post-merge, against its
 	// full symbol set. Context belongs to the scope, so it's gathered once on the
-	// final Unit. Costly finders (call-graph grep) run only when units stayed
-	// fine-grained — gated by the pre-merge Fragment count: above the watermark the
-	// Units coalesced to file scope, where per-function caller context is diluted
-	// and not worth one grep per changed function.
-	costly := total <= defaultUnitWatermark
+	// final Unit (for a chain Unit, walkForSpecs seeds visited with all member
+	// symbols, so a member never surfaces as another member's caller/callee clue).
 	for i := range units {
 		units[i].Clues = a.findClues(units[i], costly)
 	}
@@ -606,8 +619,9 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 
 	newPath := u.Path()
 
-	// Build change-files list excluding current file
-	changeFilesExcludingCurrent := a.buildChangeFilesExcept(newPath)
+	// Build change-files list excluding this Unit's own file(s) — all member paths
+	// for a cross-file call-chain Unit, the single path otherwise.
+	changeFilesExcludingCurrent := a.buildChangeFilesExcept(u.Paths()...)
 
 	// Render this unit's found context (clues) into the prompt blocks.
 	specCases, specRules, seeAlso, priorFindings := renderClues(u.Clues)
@@ -797,13 +811,21 @@ func parseFilterResponse(raw string, total int) map[int]struct{} {
 }
 
 // buildChangeFilesExcept returns a formatted list of changed files except the given path.
-func (a *Agent) buildChangeFilesExcept(excludePath string) string {
+// buildChangeFilesExcept lists the other changed files for {{change_files}},
+// excluding the Unit's own member file(s) — one path for a function/file Unit,
+// several for a cross-file call-chain Unit (so a chain's own files aren't echoed
+// back as "other" changes).
+func (a *Agent) buildChangeFilesExcept(excludePaths ...string) string {
+	exclude := make(map[string]bool, len(excludePaths))
+	for _, p := range excludePaths {
+		exclude[p] = true
+	}
 	var sb strings.Builder
 	for i, d := range a.diffs {
 		if d.IsBinary {
 			continue
 		}
-		if d.NewPath == excludePath || d.OldPath == excludePath {
+		if exclude[d.NewPath] || exclude[d.OldPath] {
 			continue
 		}
 		status := "MODIFIED"
