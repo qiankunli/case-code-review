@@ -1,7 +1,7 @@
 // Package history feeds a previous review's findings back into the next review
 // as per-unit context, so the reviewer can judge whether the current change
 // addresses what an earlier round flagged. It is the review-history counterpart
-// of spec/rule — another unit-id-keyed input, which ccr can express because it
+// of spec/rule — another symbol-id-keyed input, which ccr can express because it
 // treats the unit as a first-class concept.
 package history
 
@@ -21,10 +21,10 @@ type Finding struct {
 	Sha string `json:"sha,omitempty"`
 }
 
-// Index maps a unit-id to the findings a previous review raised on it.
+// Index maps a symbol-id to the findings a previous review raised on it.
 type Index map[string][]Finding
 
-// Load reads a --history JSON file (unit-id -> []Finding). An empty path (or an
+// Load reads a --history JSON file (symbol-id -> []Finding). An empty path (or an
 // empty file) yields nil — no history, finders no-op. A malformed file is an
 // error for the caller to surface.
 func Load(path string) (Index, error) {

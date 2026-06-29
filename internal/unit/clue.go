@@ -18,7 +18,7 @@ const (
 
 // Clue is one piece of context found for a review Unit — a contract, a review
 // rule, a see-also pointer, a caller, etc. Text is the inline content shown to
-// the reviewer; Ref is an optional pointer (a doc path or a unit-id) to fetch on
+// the reviewer; Ref is an optional pointer (a doc path or a symbol-id) to fetch on
 // demand, left empty when the clue is fully inline. Finding is separated from
 // rendering: a ClueFinder produces Clues, the review prompt renders them.
 type Clue struct {
