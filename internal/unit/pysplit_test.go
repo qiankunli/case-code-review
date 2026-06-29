@@ -34,24 +34,24 @@ class Svc:
 -        return 0
 +        return 2
 `
-	units, err := PyFuncSplitter{}.Split(model.Diff{NewPath: "p.py", Diff: rawDiff, NewFileContent: src})
+	frags, err := PyFuncSplitter{}.Split(model.Diff{NewPath: "p.py", Diff: rawDiff, NewFileContent: src})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 2 {
-		t.Fatalf("want 2 units, got %d: %v", len(units), ids(units))
+	if len(frags) != 2 {
+		t.Fatalf("want 2 fragments, got %d: %v", len(frags), ids(frags))
 	}
-	a := findUnit(t, units, "p.py::alpha")
-	if a.Scope != ScopeFunc || len(a.Symbols) != 1 || a.Symbols[0] != "p.py::alpha" {
+	a := findFrag(t, frags, "p.py::alpha")
+	if UnitOf(a).Scope != ScopeFunc || len(a.Symbols) != 1 || a.Symbols[0] != "p.py::alpha" {
 		t.Errorf("alpha fields off: %+v", a)
 	}
 	// method id is Class.method
-	findUnit(t, units, "p.py::Svc.do")
+	findFrag(t, frags, "p.py::Svc.do")
 }
 
 func TestPyFuncSplitter_SyntaxErrorFallsBack(t *testing.T) {
 	requirePython3(t)
-	units, err := PyFuncSplitter{}.Split(model.Diff{
+	frags, err := PyFuncSplitter{}.Split(model.Diff{
 		NewPath:        "p.py",
 		Diff:           "@@ -1,1 +1,1 @@\n-a\n+b\n",
 		NewFileContent: "def f(:\n  bad",
@@ -59,13 +59,13 @@ func TestPyFuncSplitter_SyntaxErrorFallsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 1 || units[0].Scope != ScopeFile {
-		t.Fatalf("syntax error should fall back to one file unit, got %v", ids(units))
+	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFile {
+		t.Fatalf("syntax error should fall back to one file fragment, got %v", ids(frags))
 	}
 }
 
 func TestPyFuncSplitter_NonPyIsFileScope(t *testing.T) {
-	units, err := PyFuncSplitter{}.Split(model.Diff{
+	frags, err := PyFuncSplitter{}.Split(model.Diff{
 		NewPath:        "a.txt",
 		Diff:           "@@ -1,1 +1,1 @@\n-a\n+b\n",
 		NewFileContent: "hello",
@@ -73,14 +73,14 @@ func TestPyFuncSplitter_NonPyIsFileScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 1 || units[0].Scope != ScopeFile {
-		t.Fatalf("non-py should be one file unit, got %v", ids(units))
+	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFile {
+		t.Fatalf("non-py should be one file fragment, got %v", ids(frags))
 	}
 }
 
 func TestAutoSplitter_RoutesByExtension(t *testing.T) {
 	// .txt -> file scope (no language splitter), regardless of python3 presence.
-	units, err := AutoSplitter{}.Split(model.Diff{
+	frags, err := AutoSplitter{}.Split(model.Diff{
 		NewPath:        "notes.txt",
 		Diff:           "@@ -1,1 +1,1 @@\n-a\n+b\n",
 		NewFileContent: "x",
@@ -88,8 +88,8 @@ func TestAutoSplitter_RoutesByExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 1 || units[0].Scope != ScopeFile {
-		t.Fatalf("txt should route to file scope, got %v", ids(units))
+	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFile {
+		t.Fatalf("txt should route to file scope, got %v", ids(frags))
 	}
 }
 

@@ -1,7 +1,5 @@
 package unit
 
-import "slices"
-
 // ClueKind identifies what kind of review context a Clue carries.
 type ClueKind string
 
@@ -36,16 +34,4 @@ type Clue struct {
 // finder, not in this interface, so adding caller/callee needs no change here.
 type ClueFinder interface {
 	Find(u Unit) []Clue
-}
-
-// addClues appends src to dst, skipping exact duplicates. CoalesceFile uses it
-// to union the clues of the functions it merges into one file Unit (same path /
-// rule clue can otherwise repeat).
-func addClues(dst, src []Clue) []Clue {
-	for _, c := range src {
-		if !slices.Contains(dst, c) {
-			dst = append(dst, c)
-		}
-	}
-	return dst
 }

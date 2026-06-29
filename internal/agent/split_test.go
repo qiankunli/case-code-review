@@ -59,8 +59,8 @@ func TestSplitUnits_GovernorCoarsensSingleFile(t *testing.T) {
 	if len(units) != 1 || units[0].Scope != unit.ScopeFile {
 		t.Fatalf("want 1 coalesced file unit, got %d (%+v)", len(units), units)
 	}
-	if len(units[0].Symbols) != defaultUnitWatermark+2 {
-		t.Errorf("coalesced unit should retain all %d func ids, got %d", defaultUnitWatermark+2, len(units[0].Symbols))
+	if len(units[0].AllSymbols()) != defaultUnitWatermark+2 {
+		t.Errorf("coalesced unit should retain all %d func ids, got %d", defaultUnitWatermark+2, len(units[0].AllSymbols()))
 	}
 }
 
@@ -86,8 +86,8 @@ func TestSplitUnits_GovernorCoarsensOnlyMultiFuncFiles(t *testing.T) {
 	// the coalesced file unit retains both of multi.go's function ids
 	for _, u := range units {
 		if u.Scope == unit.ScopeFile {
-			if len(u.Symbols) != 2 {
-				t.Errorf("coalesced multi.go unit should retain 2 func ids, got %v", u.Symbols)
+			if len(u.AllSymbols()) != 2 {
+				t.Errorf("coalesced multi.go unit should retain 2 func ids, got %v", u.AllSymbols())
 			}
 		}
 	}

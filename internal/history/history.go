@@ -57,7 +57,7 @@ func (f Finder) Find(u unit.Unit) []unit.Clue {
 		return nil
 	}
 	var clues []unit.Clue
-	for _, sym := range u.Symbols {
+	for _, sym := range u.AllSymbols() {
 		fs := f.Index[sym]
 		if len(fs) == 0 {
 			continue

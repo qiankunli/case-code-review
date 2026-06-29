@@ -16,7 +16,7 @@ import (
 type SpecFinder struct{ Index Index }
 
 func (f SpecFinder) Find(u unit.Unit) []unit.Clue {
-	if r := f.Index.Render(u.Symbols); r != "" {
+	if r := f.Index.Render(u.AllSymbols()); r != "" {
 		return []unit.Clue{{Kind: unit.ClueSpec, Text: r}}
 	}
 	return nil
@@ -27,7 +27,7 @@ type RuleFinder struct{ Index Index }
 
 func (f RuleFinder) Find(u unit.Unit) []unit.Clue {
 	var clues []unit.Clue
-	for _, sym := range u.Symbols {
+	for _, sym := range u.AllSymbols() {
 		for _, r := range f.Index[sym].Rules {
 			clues = append(clues, unit.Clue{Kind: unit.ClueRule, Text: r})
 		}
@@ -42,7 +42,7 @@ type LinkFinder struct{ Index Index }
 
 func (f LinkFinder) Find(u unit.Unit) []unit.Clue {
 	var clues []unit.Clue
-	for _, sym := range u.Symbols {
+	for _, sym := range u.AllSymbols() {
 		for _, l := range f.Index[sym].Links {
 			kind := "doc"
 			if strings.Contains(l, "::") {

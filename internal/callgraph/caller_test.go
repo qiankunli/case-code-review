@@ -34,7 +34,7 @@ func TestCallerFinder_InheritsSpecFromCaller(t *testing.T) {
 	}
 
 	// helper has no spec of its own -> walk up to its caller Handle (which does).
-	u := unit.Unit{Scope: unit.ScopeFunc, Path: "helper.go", Symbols: []string{"helper.go::helper"}}
+	u := unit.UnitOf(unit.Fragment{Path: "helper.go", Symbols: []string{"helper.go::helper"}})
 	clues := CallerFinder{RepoDir: repo, Index: idx}.Find(u)
 
 	if len(clues) != 1 {
@@ -65,7 +65,7 @@ func TestCallerFinder_ScopesUnexportedToPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	u := unit.Unit{Scope: unit.ScopeFunc, Path: "a/helper.go", Symbols: []string{"a/helper.go::helper"}}
+	u := unit.UnitOf(unit.Fragment{Path: "a/helper.go", Symbols: []string{"a/helper.go::helper"}})
 	clues := CallerFinder{RepoDir: repo, Index: idx}.Find(u)
 
 	if len(clues) != 1 {
@@ -102,21 +102,21 @@ func TestUnexportedScope(t *testing.T) {
 func TestCallerFinder_OwnSpecShortCircuits(t *testing.T) {
 	idx, _ := spec.Parse([]byte(`{"helper.go::helper": {"spec": "own contract"}}`))
 	// Own spec present -> no walk at all (no repo needed).
-	u := unit.Unit{Scope: unit.ScopeFunc, Path: "helper.go", Symbols: []string{"helper.go::helper"}}
+	u := unit.UnitOf(unit.Fragment{Path: "helper.go", Symbols: []string{"helper.go::helper"}})
 	if clues := (CallerFinder{RepoDir: t.TempDir(), Index: idx}).Find(u); clues != nil {
 		t.Errorf("own spec should short-circuit, got %+v", clues)
 	}
 }
 
 func TestCallerFinder_Degrades(t *testing.T) {
-	u := unit.Unit{Scope: unit.ScopeFunc, Symbols: []string{"a.go::f"}}
+	u := unit.UnitOf(unit.Fragment{Path: "a.go", Symbols: []string{"a.go::f"}})
 	// no index / no repo
 	if got := (CallerFinder{}).Find(u); got != nil {
 		t.Errorf("no repo/index should degrade to nil, got %+v", got)
 	}
 	// file-scope unit has no function to walk from
 	idx, _ := spec.Parse([]byte(`{"x.go::Caller": {"spec": "s"}}`))
-	file := unit.Unit{Scope: unit.ScopeFile, Path: "a.go"}
+	file := unit.UnitOf(unit.Fragment{Path: "a.go"})
 	if got := (CallerFinder{RepoDir: t.TempDir(), Index: idx}).Find(file); got != nil {
 		t.Errorf("file-scope unit should degrade to nil, got %+v", got)
 	}
@@ -166,7 +166,7 @@ func TestCallerFinder_Depth2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u := unit.Unit{Scope: unit.ScopeFunc, Path: "f.go", Symbols: []string{"f.go::deepHelper"}}
+	u := unit.UnitOf(unit.Fragment{Path: "f.go", Symbols: []string{"f.go::deepHelper"}})
 
 	// depth 2 walks deepHelper <- mid <- Entry and inherits Entry's spec.
 	clues := CallerFinder{RepoDir: repo, Index: idx, Depth: 2}.Find(u)

@@ -14,18 +14,18 @@ import "github.com/qiankunli/case-code-review/internal/model"
 // Two stages, two abstractions: Splitter (diff → diff units) and Merger (diff
 // units → review units).
 
-// FileDiffUnits pairs one file's diff units with their source diff. It is the
-// input to a Merger, which needs the file diff to build a coalesced file unit.
-type FileDiffUnits struct {
-	Diff  model.Diff
-	Units []Unit
+// FileFragments pairs one file's Fragments with their source diff. It is the
+// input to a Merger, which needs the file diff to build a coalesced file Unit.
+type FileFragments struct {
+	Diff      model.Diff
+	Fragments []Fragment
 }
 
-// Merger consolidates per-file diff units into review units, coarsening up the
+// Merger consolidates per-file Fragments into review Units, coarsening up the
 // granularity ladder by a strategy when there are too many — trading
 // per-function focus for fewer review loops.
 type Merger interface {
-	Merge(files []FileDiffUnits) []Unit
+	Merge(files []FileFragments) []Unit
 }
 
 // WatermarkMerger keeps diff units as review units until their total exceeds
@@ -38,20 +38,22 @@ type WatermarkMerger struct {
 	Watermark int
 }
 
-func (m WatermarkMerger) Merge(files []FileDiffUnits) []Unit {
+func (m WatermarkMerger) Merge(files []FileFragments) []Unit {
 	total := 0
 	for _, f := range files {
-		total += len(f.Units)
+		total += len(f.Fragments)
 	}
 	coarsen := total > m.Watermark
 
 	var review []Unit
 	for _, f := range files {
-		if coarsen && len(f.Units) > 1 {
-			review = append(review, CoalesceFile(f.Diff, f.Units))
+		if coarsen && len(f.Fragments) > 1 {
+			review = append(review, CoalesceFile(f.Diff, f.Fragments))
 			continue
 		}
-		review = append(review, f.Units...)
+		for _, fr := range f.Fragments {
+			review = append(review, UnitOf(fr))
+		}
 	}
 	return review
 }

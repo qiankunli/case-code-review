@@ -425,8 +425,8 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 				atomic.AddInt64(&a.unitFailed, 1)
 				fmt.Fprintf(stdout.Writer(), "[ccr] Unit review error for %s: %v\n", u.ID, err)
 				telemetry.ErrorEvent(fileCtx, "unit.error", err,
-					telemetry.AnyToAttr("file.path", u.Path))
-				a.recordWarning("unit_error", u.Path, err.Error())
+					telemetry.AnyToAttr("file.path", u.Path()))
+				a.recordWarning("unit_error", u.Path(), err.Error())
 			}
 		}(units[i])
 	}
@@ -514,39 +514,40 @@ const defaultUnitWatermark = 10
 // granularity ladder when there are too many (the cost governor). Deleted files
 // are skipped.
 func (a *Agent) splitUnits() ([]unit.Unit, error) {
-	// Stage 1 — split: each non-deleted file's diff → diff units.
-	var files []unit.FileDiffUnits
+	// Stage 1 — split: each non-deleted file's diff → Fragments (one per function
+	// plus a residual).
+	var files []unit.FileFragments
 	total := 0
 	for i := range a.diffs {
 		if a.diffs[i].IsDeleted {
 			continue
 		}
-		diffUnits, err := a.splitter.Split(a.diffs[i])
+		frags, err := a.splitter.Split(a.diffs[i])
 		if err != nil {
 			return nil, fmt.Errorf("split units for %s: %w", a.diffs[i].NewPath, err)
 		}
-		files = append(files, unit.FileDiffUnits{Diff: a.diffs[i], Units: diffUnits})
-		total += len(diffUnits)
+		files = append(files, unit.FileFragments{Diff: a.diffs[i], Fragments: frags})
+		total += len(frags)
 	}
 
-	// Stage 1.5 — find context: fill each diff unit's Clues before merge, so a
-	// coalesced file unit unions its functions' clues. Costly finders (call-graph
-	// grep) run only when units will stay fine-grained — above the watermark they
-	// coalesce to file units, where per-function caller context is both diluted
-	// and not worth one grep per changed function.
-	costly := total <= defaultUnitWatermark
-	for fi := range files {
-		for j := range files[fi].Units {
-			files[fi].Units[j].Clues = a.findClues(files[fi].Units[j], costly)
-		}
-	}
-
-	// Stage 2 — merge: diff units → review units (coalesced up the ladder when too many).
+	// Stage 2 — merge: Fragments → review Units (coalesced up the ladder when too many).
 	merger := a.merger
 	if merger == nil {
 		merger = unit.WatermarkMerger{Watermark: defaultUnitWatermark}
 	}
-	return merger.Merge(files), nil
+	units := merger.Merge(files)
+
+	// Stage 3 — find context: fill each review Unit's Clues post-merge, against its
+	// full symbol set. Context belongs to the scope, so it's gathered once on the
+	// final Unit. Costly finders (call-graph grep) run only when units stayed
+	// fine-grained — gated by the pre-merge Fragment count: above the watermark the
+	// Units coalesced to file scope, where per-function caller context is diluted
+	// and not worth one grep per changed function.
+	costly := total <= defaultUnitWatermark
+	for i := range units {
+		units[i].Clues = a.findClues(units[i], costly)
+	}
+	return units, nil
 }
 
 // findClues runs the cheap ClueFinders over a diff unit always, and the costly
@@ -594,16 +595,16 @@ func renderClues(clues []unit.Clue) (specCases, rules, seeAlso, priorFindings st
 func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	ctx, span := telemetry.StartSpan(ctx, "unit.review."+u.ID)
 	defer span.End()
-	telemetry.SetAttr(span, "file.path", u.Path)
-	telemetry.SetAttr(span, "lines.changed", u.Insertions+u.Deletions)
-	telemetry.SetAttr(span, "lines.inserted", u.Insertions)
-	telemetry.SetAttr(span, "lines.deleted", u.Deletions)
+	telemetry.SetAttr(span, "file.path", u.Path())
+	telemetry.SetAttr(span, "lines.changed", u.Insertions()+u.Deletions())
+	telemetry.SetAttr(span, "lines.inserted", u.Insertions())
+	telemetry.SetAttr(span, "lines.deleted", u.Deletions())
 
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
-	newPath := u.Path
+	newPath := u.Path()
 
 	// Build change-files list excluding current file
 	changeFilesExcludingCurrent := a.buildChangeFilesExcept(newPath)
@@ -621,7 +622,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	}
 
 	threshold := a.args.Template.PlanModeLineThreshold
-	changeLines := u.Insertions + u.Deletions
+	changeLines := u.Insertions() + u.Deletions()
 
 	// Phase 1: Plan (skip when changes are below threshold)
 	var planResult string
@@ -633,7 +634,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 			telemetry.AnyToAttr("threshold", threshold))
 	} else if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 {
 		var err error
-		planResult, err = a.executePlanPhase(ctx, newPath, u.Diff, changeFilesExcludingCurrent, rule)
+		planResult, err = a.executePlanPhase(ctx, newPath, u.Diff(), changeFilesExcludingCurrent, rule)
 		if err != nil {
 			fmt.Fprintf(stdout.Writer(), "[ccr] Plan phase failed for %s: %v (continuing without plan)\n", newPath, err)
 			telemetry.Eventf(ctx, "plan.failed", err.Error(),
@@ -655,7 +656,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
 		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
 		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
-		content = strings.ReplaceAll(content, "{{diff}}", u.Diff)
+		content = strings.ReplaceAll(content, "{{diff}}", u.Diff())
 		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
 		content = strings.ReplaceAll(content, "{{spec_cases}}", specCases)
 		// Curated see-also pointers; the reviewer fetches content on demand.

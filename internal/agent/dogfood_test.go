@@ -81,14 +81,16 @@ func TestDogfoodContextAssembly(t *testing.T) {
 			u.ID, orNone(sc), orNone(ru), orNone(sa))
 	}
 
-	// The entry function gets all four of its own context paths.
-	if e := got["handler.go::CreateNotebook"]; !strings.Contains(e.sc, "tenant header") ||
+	// The entry function gets all four of its own context paths. (A function
+	// Unit's ID is "<path>#<symbol>" — the telemetry id — distinct from the
+	// "<path>::<symbol>" unit-id used as the spec join key.)
+	if e := got["handler.go#CreateNotebook"]; !strings.Contains(e.sc, "tenant header") ||
 		!strings.Contains(e.ru, "hot path") || !strings.Contains(e.sa, "tenancy.md") {
 		t.Errorf("entry unit missing its own spec/rule/link context: %+v", e)
 	}
 	// The deep helper has no context of its own, yet inherits the caller's spec
 	// (and only the spec — rules/links are not inherited).
-	if e := got["service.go::doCreate"]; !strings.Contains(e.sc, "inherited from caller handler.go::CreateNotebook") ||
+	if e := got["service.go#doCreate"]; !strings.Contains(e.sc, "inherited from caller handler.go::CreateNotebook") ||
 		!strings.Contains(e.sc, "tenant header") || e.ru != "" || e.sa != "" {
 		t.Errorf("callee unit should inherit only the caller's spec: %+v", e)
 	}
