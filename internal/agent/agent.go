@@ -10,12 +10,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/qiankunli/case-code-review/internal/callgraph"
 	"github.com/qiankunli/case-code-review/internal/config/rules"
 	"github.com/qiankunli/case-code-review/internal/config/template"
-	"github.com/qiankunli/case-code-review/internal/callgraph"
 	"github.com/qiankunli/case-code-review/internal/config/toolsconfig"
 	"github.com/qiankunli/case-code-review/internal/diff"
 	"github.com/qiankunli/case-code-review/internal/gitcmd"
+	"github.com/qiankunli/case-code-review/internal/history"
 	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/llmloop"
 	"github.com/qiankunli/case-code-review/internal/model"
@@ -108,6 +109,11 @@ type Args struct {
 	// via {{spec_cases}}. Nil when no spec.json is configured.
 	SpecIndex spec.Index
 
+	// HistoryIndex is the loaded --history (unit-id -> prior findings). A unit's
+	// covered functions are looked up here and injected via {{prior_findings}} so
+	// the reviewer reconciles them with the change. Nil when no history is passed.
+	HistoryIndex history.Index
+
 	// Model is the user-configured model name used as fallback when
 	// template phases (plan/memory_compression) don't specify one.
 	Model string
@@ -174,11 +180,12 @@ func New(args Args) *Agent {
 		// WatermarkMerger coalesces them into review units above the watermark.
 		splitter: unit.AutoSplitter{},
 		merger:   unit.WatermarkMerger{Watermark: defaultUnitWatermark},
-		// Cheap, always-on: spec.json lookups by symbol.
+		// Cheap, always-on: spec.json lookups by symbol + prior-review findings.
 		finders: []unit.ClueFinder{
 			spec.SpecFinder{Index: args.SpecIndex},
 			spec.RuleFinder{Index: args.SpecIndex},
 			spec.LinkFinder{Index: args.SpecIndex},
+			history.Finder{Index: args.HistoryIndex},
 		},
 		// Costly, budget-gated: CallerFinder greps the repo to inherit a caller's
 		// governing spec. (callee finder joins here later.)
@@ -536,10 +543,11 @@ func (a *Agent) findClues(u unit.Unit, includeCostly bool) []unit.Clue {
 }
 
 // renderClues groups a review unit's clues into the prompt's context blocks: the
-// spec/case contract ({{spec_cases}}), the @rule criteria, and the see-also
-// links ({{see_also}}). The rule.json text is merged with rules by the caller.
-func renderClues(clues []unit.Clue) (specCases, rules, seeAlso string) {
-	var specBlocks, ruleLines, linkLines []string
+// spec/case contract ({{spec_cases}}), the @rule criteria, the see-also links
+// ({{see_also}}), and a previous review's findings ({{prior_findings}}). The
+// rule.json text is merged with rules by the caller.
+func renderClues(clues []unit.Clue) (specCases, rules, seeAlso, priorFindings string) {
+	var specBlocks, ruleLines, linkLines, historyBlocks []string
 	for _, c := range clues {
 		switch c.Kind {
 		case unit.ClueSpec, unit.ClueCaller, unit.ClueCallee:
@@ -551,9 +559,13 @@ func renderClues(clues []unit.Clue) (specCases, rules, seeAlso string) {
 			ruleLines = append(ruleLines, "- "+c.Text)
 		case unit.ClueLink:
 			linkLines = append(linkLines, "- "+c.Text)
+		case unit.ClueHistory:
+			// Prior-review findings: not a contract — the reviewer reconciles them
+			// (already framed as an adjudication task by the history finder).
+			historyBlocks = append(historyBlocks, c.Text)
 		}
 	}
-	return strings.Join(specBlocks, "\n"), strings.Join(ruleLines, "\n"), strings.Join(linkLines, "\n")
+	return strings.Join(specBlocks, "\n"), strings.Join(ruleLines, "\n"), strings.Join(linkLines, "\n"), strings.Join(historyBlocks, "\n")
 }
 
 // reviewUnit performs the Plan Phase + Main Loop for a single review Unit.
@@ -575,7 +587,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	changeFilesExcludingCurrent := a.buildChangeFilesExcept(newPath)
 
 	// Render this unit's found context (clues) into the prompt blocks.
-	specCases, specRules, seeAlso := renderClues(u.Clues)
+	specCases, specRules, seeAlso, priorFindings := renderClues(u.Clues)
 	// Per-function @rule (from clues) augments the path-glob rule.json criteria;
 	// both flow into {{system_rule}} (plan + main).
 	rule := a.resolveSystemRule(strings.ToLower(newPath))
@@ -626,6 +638,8 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		content = strings.ReplaceAll(content, "{{spec_cases}}", specCases)
 		// Curated see-also pointers; the reviewer fetches content on demand.
 		content = strings.ReplaceAll(content, "{{see_also}}", seeAlso)
+		// A previous review's findings on this unit, to reconcile against the change.
+		content = strings.ReplaceAll(content, "{{prior_findings}}", priorFindings)
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no
 		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
