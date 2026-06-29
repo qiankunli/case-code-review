@@ -14,6 +14,7 @@ type UnitContext struct {
 	SpecCases string // contract: own spec/case + inherited caller spec + depended-on callee contracts
 	Rules     string // path-glob rule.json + function-level @rule
 	SeeAlso   string // curated @link pointers
+	Prior     string // a previous review's findings on this unit (to reconcile)
 }
 
 // DryRun loads diffs once and returns the complete no-LLM view behind
@@ -34,7 +35,7 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, error)
 	out := make([]UnitContext, 0, len(units))
 	for _, u := range units {
 		// Mirror reviewUnit's context assembly: clues + the path-glob rule.json.
-		specCases, specRules, seeAlso := renderClues(u.Clues)
+		specCases, specRules, seeAlso, prior := renderClues(u.Clues)
 		rule := a.resolveSystemRule(strings.ToLower(u.Path))
 		if specRules != "" {
 			if rule != "" {
@@ -48,6 +49,7 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, error)
 			SpecCases: specCases,
 			Rules:     rule,
 			SeeAlso:   seeAlso,
+			Prior:     prior,
 		})
 	}
 	return preview, out, nil

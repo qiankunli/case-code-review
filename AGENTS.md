@@ -7,6 +7,8 @@
 1. **捕获更多 context**——从 diff 定位到改动**函数**，收集它的 caller/callee 邻域 + 作者附着的 **spec/case/rule/link**。
 2. **按 *review unit* 触发 review loop**——unit 是评审作用域，粒度是一条阶梯（函数 → 类 → 文件 → 模块/目录）。
 
+> **与 ocr 的本质区别 = 把 unit 当一等概念**。一切按 unit 走：`--spec`(契约) / `--rule`(准则) / `--history`(上轮评审反馈) 都是按 unit-id 注入的 **per-unit 上下文**，`Clue`/`ClueFinder` 把 context 挂到 unit。ocr 停在 file 级、没有 unit。判断一个新能力是否"对味"，就看它有没有让 unit 更一等。
+
 **边界**：ccr 是**消费侧引擎**。spec/case/rule/link 资产的**定义、各语言写法、`spec.json` schema、unit-id 契约**，以及产 `spec.json` 的 **`specgen` 抽取器**（Go + Python 参考实现），都在独立项目 [`spec-case`](https://github.com/qiankunli/spec-case)，**不在 ccr**。ccr 只消费 `spec.json` + 现场解析函数边界。
 
 ## 代码地图与核心模块
@@ -17,6 +19,7 @@ case-code-review/
 └── internal/
     ├── unit/       ★ Unit 两阶段（Splitter→diff unit：Go go/ast、Python python3；Merger→review unit：WatermarkMerger 归并）+ context 抽象 Clue / ClueFinder / Unit.Clues
     ├── spec/       ★ 消费 spec.json：SpecFinder/RuleFinder/LinkFinder 把 spec/case/rule/link 找成 Clue（廉价 finder）
+    ├── history/    ★ 消费 --history（上轮评审 findings，unit-id keyed）：Finder 挂成 ClueHistory，渲染成"核验是否已修"的 prompt（廉价 finder；评审反馈闭环的消费侧）
     ├── callgraph/  ★ caller/callee 邻域上下文（昂贵 finder）：CallerFinder（上溯 governing spec）/ CalleeFinder（下探依赖契约），共享有界 walk（深度 2、每分支停在最近带 spec 的邻居），git grep + go/ast / python3，Go+Python
     ├── agent/      ★ 评审编排：split→找 Clue（廉价 + 按预算闸门的昂贵 finder）→merge→每 review unit 一个 loop；按 Clue 渲染上下文；file 级 review-filter；`--dry-run` 只装配上下文、不调 LLM
     ├── diff/       diff/hunk 解析、评论行号解析

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/agent"
+	"github.com/qiankunli/case-code-review/internal/history"
 	"github.com/qiankunli/case-code-review/internal/spec"
 	"github.com/qiankunli/case-code-review/internal/telemetry"
 	"github.com/qiankunli/case-code-review/internal/tool"
@@ -71,6 +72,10 @@ func runReview(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load spec: %w", err)
 	}
+	historyIndex, err := history.Load(opts.historyPath)
+	if err != nil {
+		return fmt.Errorf("load history: %w", err)
+	}
 
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
@@ -91,6 +96,7 @@ func runReview(args []string) error {
 		Model:                 rt.Model,
 		Background:            opts.background,
 		SpecIndex:             specIndex,
+		HistoryIndex:          historyIndex,
 		GitRunner:             cc.GitRunner,
 	})
 
@@ -200,16 +206,21 @@ func runDryRun(cc *commonContext, opts reviewOptions) error {
 	if err != nil {
 		return fmt.Errorf("load spec: %w", err)
 	}
+	historyIndex, err := history.Load(opts.historyPath)
+	if err != nil {
+		return fmt.Errorf("load history: %w", err)
+	}
 	ag := agent.New(agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
-		SpecIndex:  specIndex,
-		SystemRule: cc.Resolver,
-		Background: opts.background,
+		RepoDir:      cc.RepoDir,
+		From:         opts.from,
+		To:           opts.to,
+		Commit:       opts.commit,
+		FileFilter:   cc.FileFilter,
+		GitRunner:    cc.GitRunner,
+		SpecIndex:    specIndex,
+		HistoryIndex: historyIndex,
+		SystemRule:   cc.Resolver,
+		Background:   opts.background,
 	})
 
 	preview, units, err := ag.DryRun(context.Background())

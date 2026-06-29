@@ -290,6 +290,7 @@ func outputDryRunText(units []agent.UnitContext) {
 		dryRunSection("Governing Spec/Case", u.SpecCases)
 		dryRunSection("Review Rules", u.Rules)
 		dryRunSection("See Also", u.SeeAlso)
+		dryRunSection("Prior Review", u.Prior)
 	}
 }
 

@@ -12,6 +12,10 @@ const (
 	// Reserved for a future call-graph finder; not emitted yet.
 	ClueCaller ClueKind = "caller"
 	ClueCallee ClueKind = "callee"
+	// ClueHistory carries a prior review's findings on this unit, so the reviewer
+	// can judge whether the current change addresses them (the review-history
+	// feedback loop — a per-unit input alongside spec/rule).
+	ClueHistory ClueKind = "history"
 )
 
 // Clue is one piece of context found for a review Unit — a contract, a review
