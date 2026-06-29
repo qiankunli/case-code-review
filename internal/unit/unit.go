@@ -179,9 +179,9 @@ func NewChainUnit(frags []Fragment) Unit {
 
 // symbolName returns the bare symbol from a symbol-id ("p/x.go::Svc.Get" -> "Svc.Get")
 // for building a Unit ID; falls back to the whole string when it isn't an id.
-func symbolName(unitID string) string {
-	if _, sym, ok := SplitID(unitID); ok {
+func symbolName(symbolID string) string {
+	if _, sym, ok := SplitID(symbolID); ok {
 		return sym
 	}
-	return unitID
+	return symbolID
 }

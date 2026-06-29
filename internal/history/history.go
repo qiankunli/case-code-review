@@ -73,9 +73,9 @@ func (f Finder) Find(u unit.Unit) []unit.Clue {
 
 // render frames the prior findings as an adjudication task for the reviewer:
 // confirm fixes, re-raise survivors, don't re-flag what's resolved.
-func render(unitID string, fs []Finding) string {
+func render(symbolID string, fs []Finding) string {
 	var b strings.Builder
-	b.WriteString("A previous review flagged " + unitID +
+	b.WriteString("A previous review flagged " + symbolID +
 		" — for each, check whether the current code addresses it: if fixed, say so briefly; if still present, re-raise it; do not re-flag what's resolved.\n")
 	for _, fnd := range fs {
 		b.WriteString("- " + fnd.Msg)

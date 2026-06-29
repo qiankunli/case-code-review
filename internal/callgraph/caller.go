@@ -82,8 +82,8 @@ func (f CallerFinder) callers(funcID string) []string {
 
 // funcName returns the bare function/method name from a symbol-id, for grepping:
 // "pkg/x.go::Service.Get" -> "Get", "pkg/x.go::Helper" -> "Helper".
-func funcName(unitID string) string {
-	_, symbol, ok := unit.SplitID(unitID)
+func funcName(symbolID string) string {
+	_, symbol, ok := unit.SplitID(symbolID)
 	if !ok {
 		return ""
 	}
