@@ -25,6 +25,32 @@ func TestBuildGrepArgs_WorkspaceMode(t *testing.T) {
 	}
 }
 
+func TestBuildGrepArgs_WorkspaceModeSearchesUntracked(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
+	args := p.buildGrepArgs("myFunc", false, false, false, nil)
+	// Workspace search must include freshly-added (untracked) files, else a new
+	// file's content is invisible to the reviewer.
+	assertContains(t, args, "--untracked")
+}
+
+func TestBuildGrepArgs_CommitModeNoUntracked(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "abc1234"})
+	args := p.buildGrepArgs("myFunc", false, false, false, nil)
+	// Ref search reads a committed tree, where "untracked" is meaningless.
+	if slices.Contains(args, "--untracked") {
+		t.Error("--untracked must not be used in ref/commit mode")
+	}
+}
+
+func TestBuildGrepArgs_NoIndexNoUntracked(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
+	args := p.buildGrepArgs("myFunc", false, false, true, nil) // noIndex
+	if slices.Contains(args, "--untracked") {
+		t.Error("--untracked must not combine with --no-index")
+	}
+	assertContains(t, args, "--no-index")
+}
+
 func TestBuildGrepArgs_CommitMode(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "abc1234"})
 	args := p.buildGrepArgs("myFunc", false, false, false, []string{"pkg/"})
