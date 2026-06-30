@@ -128,7 +128,7 @@ func sessionJSONLPath(t *testing.T, repoDir, sessionID string) string {
 	if err != nil {
 		t.Fatalf("home dir: %v", err)
 	}
-	return filepath.Join(home, ".casecodereview", "sessions", encodeRepoPath(repoDir), sessionID+".jsonl")
+	return filepath.Join(home, ".casecodereview", sessionSubDir, encodeRepoPath(repoDir), sessionID+".jsonl")
 }
 
 func TestSetErrorIncrementsCounter(t *testing.T) {
@@ -210,7 +210,7 @@ func TestSessionFilePermissions(t *testing.T) {
 	jw.WriteSessionStart(time.Now())
 	defer jw.flushAndClose()
 
-	sessionDir := filepath.Join(tmpHome, ".casecodereview", "sessions", encodeRepoPath(repoDir))
+	sessionDir := filepath.Join(tmpHome, ".casecodereview", sessionSubDir, encodeRepoPath(repoDir))
 	sessionFile := filepath.Join(sessionDir, sessionID+".jsonl")
 
 	dirInfo, err := os.Stat(sessionDir)
@@ -277,8 +277,9 @@ func TestLogPath(t *testing.T) {
 		t.Errorf("log path should end with <session-id>.log, got %q", p)
 	}
 	// it must live next to where the JSONL transcript would, and the dir exists.
-	if !strings.Contains(p, filepath.Join(".casecodereview", "sessions")) {
-		t.Errorf("log should be under .casecodereview/sessions, got %q", p)
+	// (tests run with UseTestSessions(), so the subdir is "test-sessions".)
+	if !strings.Contains(p, filepath.Join(".casecodereview", sessionSubDir)) {
+		t.Errorf("log should be under .casecodereview/%s, got %q", sessionSubDir, p)
 	}
 	if _, err := os.Stat(filepath.Dir(p)); err != nil {
 		t.Errorf("session dir should be created: %v", err)
