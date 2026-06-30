@@ -1,4 +1,4 @@
-.PHONY: build test clean run help fmt vet check \
+.PHONY: build install test clean run help fmt vet check \
 	build-all dist sha256sum version-info \
 	build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64 \
 	build-windows-amd64 build-windows-arm64
@@ -6,6 +6,7 @@
 BINARY_NAME := ccr
 GO          := go
 DIST_DIR    := ./dist
+INSTALL_DIR ?= $(HOME)/.local/bin
 
 # Version info — use git tag if available, fallback to short commit hash
 GIT_TAG     := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "")
@@ -28,6 +29,15 @@ endef
 # ── Development targets ──────────────────────────────────────────────────────
 build:
 	$(GO) build -ldflags "$(LD_FLAGS)" -o $(DIST_DIR)/$(BINARY_NAME) ./cmd/ccr
+
+# Install the freshly built binary to INSTALL_DIR (default ~/.local/bin).
+# On macOS, ad-hoc re-sign after the copy: cp invalidates the code signature and
+# the OS then SIGKILLs the binary on first run; `codesign --sign -` restores it.
+install: build
+	mkdir -p $(INSTALL_DIR)
+	cp $(DIST_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
+	@if [ "$$(uname)" = "Darwin" ]; then codesign --force --sign - $(INSTALL_DIR)/$(BINARY_NAME) && echo "re-signed for macOS"; fi
+	@echo "installed $(BINARY_NAME) $(VERSION) -> $(INSTALL_DIR)/$(BINARY_NAME)"
 
 test:
 	LC_ALL=C $(GO) test -v -race -count=1 ./...
