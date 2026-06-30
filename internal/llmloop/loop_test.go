@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/qiankunli/case-code-review/internal/llm"
+	"github.com/qiankunli/case-code-review/internal/session"
 	"github.com/qiankunli/case-code-review/internal/tool"
 )
 
@@ -34,7 +35,7 @@ func TestExecuteToolCall_CodeCommentOverridesHallucinatedPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cp := r.executeToolCall(context.Background(), "correct.go", llm.ToolCall{
+	cp := r.executeToolCall(context.Background(), session.Scope{ID: "correct.go", Kind: "file", Type: "file", Paths: []string{"correct.go"}}, llm.ToolCall{
 		Function: llm.FunctionCall{
 			Name:      "code_comment",
 			Arguments: string(argsJSON),

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -133,19 +133,19 @@ func sessionJSONLPath(t *testing.T, repoDir, sessionID string) string {
 
 func TestSetErrorIncrementsCounter(t *testing.T) {
 	sh := &SessionHistory{
-		SessionID:    generateUUID(),
-		FileSessions: make(map[string]*FileSession),
+		SessionID: generateUUID(),
+		Scopes:    make(map[string]*ScopeSession),
 	}
-	fs := sh.GetOrCreateFileSession("test.go")
+	fs := sh.GetOrCreateScope(Scope{ID: "test.go", Kind: "file", Type: "file", Paths: []string{"test.go"}})
 
-	rec1 := &TaskRecord{Type: MainTask, RequestNo: 1, fileSession: fs}
+	rec1 := &TaskRecord{Type: MainTask, RequestNo: 1, scopeSession: fs}
 	rec1.SetError(fmt.Errorf("timeout"), 1*time.Second)
 
 	if got := sh.LLMFailures(); got != 1 {
 		t.Errorf("after 1 error: LLMFailures() = %d, want 1", got)
 	}
 
-	rec2 := &TaskRecord{Type: PlanTask, RequestNo: 1, fileSession: fs}
+	rec2 := &TaskRecord{Type: PlanTask, RequestNo: 1, scopeSession: fs}
 	rec2.SetError(fmt.Errorf("rate limit"), 2*time.Second)
 
 	if got := sh.LLMFailures(); got != 2 {
@@ -158,7 +158,7 @@ func TestSetErrorWritesJSONL(t *testing.T) {
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
 	defer sh.Finalize()
 
-	fs := sh.GetOrCreateFileSession("foo.go")
+	fs := sh.GetOrCreateScope(Scope{ID: "foo.go", Kind: "file", Type: "file", Paths: []string{"foo.go"}})
 	rec := fs.AppendTaskRecord(MainTask, nil)
 	rec.SetError(fmt.Errorf("connection refused"), 500*time.Millisecond)
 
@@ -234,9 +234,9 @@ func TestSessionEndIncludesFailures(t *testing.T) {
 	repoDir := t.TempDir()
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
 
-	fs := sh.GetOrCreateFileSession("bar.go")
+	fs := sh.GetOrCreateScope(Scope{ID: "bar.go", Kind: "file", Type: "file", Paths: []string{"bar.go"}})
 	for i := 0; i < 3; i++ {
-		rec := &TaskRecord{Type: MainTask, RequestNo: i + 1, fileSession: fs}
+		rec := &TaskRecord{Type: MainTask, RequestNo: i + 1, scopeSession: fs}
 		rec.SetError(fmt.Errorf("error %d", i), time.Second)
 	}
 

@@ -229,6 +229,7 @@ h3 { margin: 1.5rem 0 0.75rem; color: #24292e; }
 .task-plan .task-type-dot { background: #8250df; }
 .task-memory .task-type-dot { background: #8b949e; }
 .task-relocation .task-type-dot { background: #e36209; }
+.task-filter .task-type-dot { background: #1a7f37; }
 .task-default .task-type-dot { background: #57606a; }
 
 /* Card */
@@ -246,6 +247,7 @@ h3 { margin: 1.5rem 0 0.75rem; color: #24292e; }
 .task-plan .card { border-left: 3px solid #8250df; }
 .task-memory .card { border-left: 3px solid #8b949e; }
 .task-relocation .card { border-left: 3px solid #e36209; }
+.task-filter .card { border-left: 3px solid #1a7f37; }
 
 .card-header {
     background: #f6f8fa;
@@ -275,6 +277,11 @@ h3 { margin: 1.5rem 0 0.75rem; color: #24292e; }
 .badge-tokens { background: #dafbe1; color: #116329; }
 .badge-duration { background: #fff8c5; color: #6a5700; }
 .badge-error { background: #ffebe9; color: #cf222e; }
+.badge-scope { background: #eaeef2; color: #24292e; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+
+/* Unit accordion: member files of a cross-file (call-chain) Unit */
+.unit-paths { font-size: 0.75rem; color: #8b949e; }
+.section-note { color: #8b949e; font-size: 0.8rem; padding: 0.2rem 0 0.6rem; }
 
 /* Response Content */
 .card-body {

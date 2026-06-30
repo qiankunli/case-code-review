@@ -187,7 +187,7 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // messages, summarizing the compress zone while preserving the active zone
 // intact. Returns rebuilt as [frozen] + [compressed_summary appended to
 // the user prompt] + [active].
-func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
+func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, sc session.Scope) ([]llm.Message, error) {
 	if len(r.deps.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= 2 {
 		return msgs[:min(len(msgs), 2)], nil
 	}
@@ -213,7 +213,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 	})
 	duration := time.Since(startTime)
 
-	fs := r.deps.Session.GetOrCreateFileSession(filePath)
+	fs := r.deps.Session.GetOrCreateScope(sc)
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, compressionMsgs)
 	if err != nil {
 		rec.SetError(err, duration)
@@ -253,7 +253,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 }
 
 // triggerAsyncCompression kicks off a background compression job.
-func (r *Runner) triggerAsyncCompression(ctx context.Context, messages []llm.Message, filePath string) {
+func (r *Runner) triggerAsyncCompression(ctx context.Context, messages []llm.Message, sc session.Scope) {
 	msgSnapshot := copyMessages(messages)
 
 	asyncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
@@ -265,7 +265,7 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, messages []llm.Mes
 
 	go func() {
 		defer cancel()
-		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, filePath)
+		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, sc)
 
 		r.compressionMu.Lock()
 		defer r.compressionMu.Unlock()
