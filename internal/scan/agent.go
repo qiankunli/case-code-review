@@ -70,6 +70,13 @@ type Args struct {
 }
 
 // planEnabled / dedupEnabled / summaryEnabled report whether each optional
+// scanScope records scan work under a file-kind scope. Scan reviews whole files
+// (no Unit splitting), so the scope id is the file path (or a synthetic key for
+// project-summary / dedup-batch passes).
+func scanScope(path string) session.Scope {
+	return session.Scope{ID: path, Kind: "file", Type: "scan", Paths: []string{path}}
+}
+
 // phase will actually run: template must define it AND the corresponding
 // --no-* flag must not be set. Used by both cost estimation and dispatch.
 func (a *Agent) planEnabled() bool {
@@ -554,7 +561,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) error {
 		return nil
 	}
 
-	return a.runner.RunPerFile(ctx, messages, it.Path)
+	return a.runner.RunPerFile(ctx, messages, scanScope(it.Path))
 }
 
 // maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable
@@ -582,7 +589,7 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
-	fs := a.session.GetOrCreateFileSession(it.Path)
+	fs := a.session.GetOrCreateScope(scanScope(it.Path))
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
 	startTime := time.Now()
 
@@ -635,7 +642,7 @@ func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.Llm
 	}
 
 	const pathKey = "__scan_project_summary__"
-	fs := a.session.GetOrCreateFileSession(pathKey)
+	fs := a.session.GetOrCreateScope(scanScope(pathKey))
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, messages) // reuse existing task type
 	startTime := time.Now()
 
@@ -710,7 +717,7 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
 	// Use a synthetic file path keyed by batch index so the session JSONL
 	// keeps dedup records distinct from per-file plan/main records.
 	pathKey := fmt.Sprintf("__scan_dedup_batch_%d__", batchIdx)
-	fs := a.session.GetOrCreateFileSession(pathKey)
+	fs := a.session.GetOrCreateScope(scanScope(pathKey))
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, messages) // reuse existing task type; no scan-specific type to invent
 	startTime := time.Now()
 

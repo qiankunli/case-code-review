@@ -1,6 +1,7 @@
 // Package session provides a session history mechanism for collecting conversation
-// records during code review task execution. It organizes records by file path
-// and request type (plan_task, main_task, memory_compression_task).
+// records during code review task execution. It organizes records by review scope
+// (a Unit, or a file-level pass — see ScopeSession) and request type (plan_task,
+// main_task, re_location_task, memory_compression_task, review_filter_task).
 package session
 
 import (
@@ -33,28 +34,53 @@ const (
 // SessionHistory is the top-level container for an entire CR run.
 // It is safe for concurrent use by multiple goroutines.
 type SessionHistory struct {
-	mu           sync.Mutex
-	SessionID    string
-	RepoDir      string
-	GitBranch    string
-	Model        string
-	ReviewMode   string
-	DiffFrom     string
-	DiffTo       string
-	DiffCommit   string
-	StartTime    time.Time
-	EndTime      time.Time
-	persist      *jsonlWriter
-	FileSessions map[string]*FileSession
-	llmFailures  int64
+	mu          sync.Mutex
+	SessionID   string
+	RepoDir     string
+	GitBranch   string
+	Model       string
+	ReviewMode  string
+	DiffFrom    string
+	DiffTo      string
+	DiffCommit  string
+	StartTime   time.Time
+	EndTime     time.Time
+	persist     *jsonlWriter
+	Scopes      map[string]*ScopeSession
+	llmFailures int64
 }
 
-// FileSession represents the conversation records for a single file subtask.
-type FileSession struct {
+// ScopeSession holds the conversation records for one review scope: a Unit
+// (plan / main / memory-compression / re-location all nest here), or a
+// file-level pass (review_filter, or scan's per-file work). Keyed by scope ID
+// so two Units in the same file don't collide and a cross-file Unit stays whole.
+type ScopeSession struct {
 	mu          sync.Mutex
-	FilePath    string
+	ID          string   // scope id: unit.ID, or file path for file-level passes
+	Kind        string   // "unit" | "file"
+	Scope       string   // func/file/callchain (units) | filter | scan
+	Paths       []string // member file(s)
+	Path        string   // representative member path; comment anchor / log label
 	TaskRecords map[TaskType][]*TaskRecord
 	session     *SessionHistory // back-reference for JSONL persistence
+}
+
+// Scope identifies a review sub-session for recording: a Unit, or a file-level
+// pass. Callers build it from a unit.Unit (review) or a file path (review_filter
+// / scan); SessionHistory keys ScopeSessions by ID.
+type Scope struct {
+	ID    string   // unit.ID, or file path for file-level passes
+	Kind  string   // "unit" | "file"
+	Type  string   // func/file/callchain (units) | filter | scan
+	Paths []string // member file(s)
+}
+
+// Path returns the representative member path (comment anchor / log label).
+func (s Scope) Path() string {
+	if len(s.Paths) > 0 {
+		return s.Paths[0]
+	}
+	return s.ID
 }
 
 // TaskRecord captures a single LLM request-response cycle within a file subtask.
@@ -66,7 +92,7 @@ type TaskRecord struct {
 	ToolResults     []ToolResultRecord
 	Duration        time.Duration
 	Error           string
-	fileSession     *FileSession // back-reference for JSONL persistence
+	scopeSession    *ScopeSession // back-reference for JSONL persistence
 }
 
 // TokenUsage holds token usage for a single LLM request/response cycle.
@@ -106,16 +132,16 @@ type SessionOptions struct {
 func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
 	sessionID := generateUUID()
 	sh := &SessionHistory{
-		SessionID:    sessionID,
-		RepoDir:      repoDir,
-		GitBranch:    gitBranch,
-		Model:        model,
-		ReviewMode:   opts.ReviewMode,
-		DiffFrom:     opts.DiffFrom,
-		DiffTo:       opts.DiffTo,
-		DiffCommit:   opts.DiffCommit,
-		StartTime:    time.Now(),
-		FileSessions: make(map[string]*FileSession),
+		SessionID:  sessionID,
+		RepoDir:    repoDir,
+		GitBranch:  gitBranch,
+		Model:      model,
+		ReviewMode: opts.ReviewMode,
+		DiffFrom:   opts.DiffFrom,
+		DiffTo:     opts.DiffTo,
+		DiffCommit: opts.DiffCommit,
+		StartTime:  time.Now(),
+		Scopes:     make(map[string]*ScopeSession),
 	}
 
 	p, err := newJSONLWriter(sessionID, repoDir, gitBranch, model, opts)
@@ -129,22 +155,27 @@ func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory 
 	return sh
 }
 
-// GetOrCreateFileSession returns the FileSession for the given file path,
-// creating one if it doesn't exist yet.
-func (sh *SessionHistory) GetOrCreateFileSession(filePath string) *FileSession {
+// GetOrCreateScope returns the ScopeSession for the given scope, creating one
+// if it doesn't exist yet. Keyed by scope ID, so every task of one Unit (or one
+// file-level pass) lands in the same sub-session.
+func (sh *SessionHistory) GetOrCreateScope(sc Scope) *ScopeSession {
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 
-	fs, ok := sh.FileSessions[filePath]
+	ss, ok := sh.Scopes[sc.ID]
 	if !ok {
-		fs = &FileSession{
-			FilePath:    filePath,
+		ss = &ScopeSession{
+			ID:          sc.ID,
+			Kind:        sc.Kind,
+			Scope:       sc.Type,
+			Paths:       sc.Paths,
+			Path:        sc.Path(),
 			TaskRecords: make(map[TaskType][]*TaskRecord),
 			session:     sh,
 		}
-		sh.FileSessions[filePath] = fs
+		sh.Scopes[sc.ID] = ss
 	}
-	return fs
+	return ss
 }
 
 // Finalize marks the session as complete, sets the end time, and persists
@@ -154,9 +185,15 @@ func (sh *SessionHistory) Finalize() {
 	sh.EndTime = time.Now()
 	p := sh.persist
 	duration := sh.EndTime.Sub(sh.StartTime)
-	filesReviewed := make([]string, 0, len(sh.FileSessions))
-	for fp := range sh.FileSessions {
-		filesReviewed = append(filesReviewed, fp)
+	seen := make(map[string]bool)
+	filesReviewed := make([]string, 0, len(sh.Scopes))
+	for _, ss := range sh.Scopes {
+		for _, p := range ss.Paths {
+			if p != "" && !seen[p] {
+				seen[p] = true
+				filesReviewed = append(filesReviewed, p)
+			}
+		}
 	}
 	failures := atomic.LoadInt64(&sh.llmFailures)
 	sh.mu.Unlock()
@@ -166,23 +203,23 @@ func (sh *SessionHistory) Finalize() {
 	}
 }
 
-// AppendTaskRecord adds a new task record to the file session for the given
-// file path and task type. It auto-assigns the RequestNo based on existing records
-// and writes an llm_request record to the JSONL stream.
-func (fs *FileSession) AppendTaskRecord(taskType TaskType, messages []llm.Message) *TaskRecord {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+// AppendTaskRecord adds a new task record to this scope session for the given
+// task type. It auto-assigns the RequestNo based on existing records and writes
+// an llm_request record to the JSONL stream.
+func (ss *ScopeSession) AppendTaskRecord(taskType TaskType, messages []llm.Message) *TaskRecord {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	rec := &TaskRecord{
 		Type:            taskType,
-		RequestNo:       len(fs.TaskRecords[taskType]) + 1,
+		RequestNo:       len(ss.TaskRecords[taskType]) + 1,
 		RequestMessages: copyMessages(messages),
-		fileSession:     fs,
+		scopeSession:    ss,
 	}
-	fs.TaskRecords[taskType] = append(fs.TaskRecords[taskType], rec)
+	ss.TaskRecords[taskType] = append(ss.TaskRecords[taskType], rec)
 
-	if p := fs.session.persist; p != nil {
-		p.WriteLLMRequest(fs.FilePath, taskType, rec.RequestNo, copyMessagesForJSON(messages))
+	if p := ss.session.persist; p != nil {
+		p.WriteLLMRequest(ss, taskType, rec.RequestNo, copyMessagesForJSON(messages))
 	}
 
 	return rec
@@ -263,8 +300,8 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 	}
 	tr.Duration = duration
 
-	if fs := tr.fileSession; fs != nil {
-		if p := fs.session.persist; p != nil {
+	if ss := tr.scopeSession; ss != nil {
+		if p := ss.session.persist; p != nil {
 			toolCallsJSON := make([]map[string]any, 0, len(choice.Message.ToolCalls))
 			for _, tc := range choice.Message.ToolCalls {
 				toolCallsJSON = append(toolCallsJSON, map[string]any{
@@ -273,7 +310,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 					"arguments": tc.Function.Arguments,
 				})
 			}
-			p.WriteLLMResponse(fs.FilePath, tr.Type, content, toolCallsJSON, resp.Model, *usage, duration)
+			p.WriteLLMResponse(ss, tr.Type, content, toolCallsJSON, resp.Model, *usage, duration)
 		}
 	}
 }
@@ -284,11 +321,11 @@ func (tr *TaskRecord) SetError(err error, duration time.Duration) {
 	tr.Error = err.Error()
 	tr.Duration = duration
 
-	if fs := tr.fileSession; fs != nil {
-		if p := fs.session.persist; p != nil {
-			p.WriteLLMError(fs.FilePath, tr.Type, tr.RequestNo, err.Error(), duration)
+	if ss := tr.scopeSession; ss != nil {
+		if p := ss.session.persist; p != nil {
+			p.WriteLLMError(ss, tr.Type, tr.RequestNo, err.Error(), duration)
 		}
-		atomic.AddInt64(&fs.session.llmFailures, 1)
+		atomic.AddInt64(&ss.session.llmFailures, 1)
 	}
 }
 
@@ -306,9 +343,9 @@ func (tr *TaskRecord) AddToolResult(toolName, arguments, result string) {
 		Result:    result,
 	})
 
-	if fs := tr.fileSession; fs != nil {
-		if p := fs.session.persist; p != nil {
-			p.WriteToolCall(fs.FilePath, tr.Type, toolName, arguments, result, true, 0)
+	if ss := tr.scopeSession; ss != nil {
+		if p := ss.session.persist; p != nil {
+			p.WriteToolCall(ss, tr.Type, toolName, arguments, result, true, 0)
 		}
 	}
 }
