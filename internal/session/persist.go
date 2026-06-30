@@ -169,8 +169,19 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	return uuid
 }
 
+// addScopeFields stamps the scope identity onto a per-record map: unit_id/kind/
+// scope/paths identify the review scope (a Unit, or a file-level pass); filePath
+// is the representative member path, kept for comment anchoring and file rollups.
+func addScopeFields(rec map[string]any, ss *ScopeSession) {
+	rec["filePath"] = ss.Path
+	rec["unit_id"] = ss.ID
+	rec["kind"] = ss.Kind
+	rec["scope"] = ss.Scope
+	rec["paths"] = ss.Paths
+}
+
 // WriteLLMRequest writes a request entry with the resolved messages.
-func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, requestNo int, messages any) string {
+func (jw *jsonlWriter) WriteLLMRequest(ss *ScopeSession, taskType TaskType, requestNo int, messages any) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -181,18 +192,18 @@ func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, reque
 		"type":       "llm_request",
 		"sessionId":  jw.sessionID,
 		"timestamp":  time.Now().UTC().Format(time.RFC3339),
-		"filePath":   filePath,
 		"taskType":   string(taskType),
 		"request_no": requestNo,
 		"messages":   messages,
 	}
+	addScopeFields(rec, ss)
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid
 }
 
 // WriteLLMResponse writes a response entry with model, content, tool calls, usage.
-func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration) string {
+func (jw *jsonlWriter) WriteLLMResponse(ss *ScopeSession, taskType TaskType, content string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -203,7 +214,6 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 		"type":        "llm_response",
 		"sessionId":   jw.sessionID,
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"filePath":    filePath,
 		"taskType":    string(taskType),
 		"model":       model,
 		"content":     content,
@@ -216,13 +226,14 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 			"cache_write_tokens": usage.CacheWriteTokens,
 		},
 	}
+	addScopeFields(rec, ss)
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid
 }
 
 // WriteLLMError writes an llm_error entry recording a failed LLM request.
-func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, requestNo int, errorMsg string, duration time.Duration) string {
+func (jw *jsonlWriter) WriteLLMError(ss *ScopeSession, taskType TaskType, requestNo int, errorMsg string, duration time.Duration) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -233,19 +244,19 @@ func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, request
 		"type":        "llm_error",
 		"sessionId":   jw.sessionID,
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"filePath":    filePath,
 		"taskType":    string(taskType),
 		"request_no":  requestNo,
 		"error":       errorMsg,
 		"duration_ms": duration.Milliseconds(),
 	}
+	addScopeFields(rec, ss)
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid
 }
 
 // WriteToolCall writes a tool call result entry.
-func (jw *jsonlWriter) WriteToolCall(filePath string, taskType TaskType, toolName, arguments, result string, ok bool, duration time.Duration) string {
+func (jw *jsonlWriter) WriteToolCall(ss *ScopeSession, taskType TaskType, toolName, arguments, result string, ok bool, duration time.Duration) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -256,7 +267,6 @@ func (jw *jsonlWriter) WriteToolCall(filePath string, taskType TaskType, toolNam
 		"type":        "tool_call",
 		"sessionId":   jw.sessionID,
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"filePath":    filePath,
 		"taskType":    string(taskType),
 		"tool_name":   toolName,
 		"arguments":   arguments,
@@ -264,6 +274,7 @@ func (jw *jsonlWriter) WriteToolCall(filePath string, taskType TaskType, toolNam
 		"ok":          ok,
 		"duration_ms": duration.Milliseconds(),
 	}
+	addScopeFields(rec, ss)
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid

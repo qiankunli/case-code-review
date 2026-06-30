@@ -618,6 +618,10 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	}
 
 	newPath := u.Path()
+	// All of this Unit's tasks (plan / main / compression / relocation) record
+	// under one scope keyed by Unit.ID, so the viewer groups them together and
+	// a cross-file Unit stays whole.
+	sc := session.Scope{ID: u.ID, Kind: "unit", Type: string(u.Scope), Paths: u.Paths()}
 
 	// Build change-files list excluding this Unit's own file(s) — all member paths
 	// for a cross-file call-chain Unit, the single path otherwise.
@@ -648,7 +652,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 			telemetry.AnyToAttr("threshold", threshold))
 	} else if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 {
 		var err error
-		planResult, err = a.executePlanPhase(ctx, newPath, u.Diff(), changeFilesExcludingCurrent, rule)
+		planResult, err = a.executePlanPhase(ctx, sc, u.Diff(), changeFilesExcludingCurrent, rule)
 		if err != nil {
 			fmt.Fprintf(stdout.Writer(), "[ccr] Plan phase failed for %s: %v (continuing without plan)\n", newPath, err)
 			telemetry.Eventf(ctx, "plan.failed", err.Error(),
@@ -708,7 +712,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	// REVIEW_FILTER_TASK is NOT run here: it is a file-level post-pass
 	// (runReviewFilters), so sibling Units of the same file don't filter each
 	// other's comments against the wrong diff slice.
-	return a.runner.RunPerFile(ctx, messages, newPath)
+	return a.runner.RunPerFile(ctx, messages, sc)
 }
 
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
@@ -742,7 +746,9 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff) {
 		defer cancel()
 	}
 
-	fs := a.session.GetOrCreateFileSession(newPath)
+	// review_filter is a file-level pass (filters all of a file's comments across
+	// sibling Units), so it records under a file-kind scope, not any one Unit.
+	fs := a.session.GetOrCreateScope(session.Scope{ID: newPath, Kind: "file", Type: "filter", Paths: []string{newPath}})
 	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
 	startTime := time.Now()
 
@@ -941,7 +947,8 @@ func (a *Agent) extFromPath(path string) string {
 
 // executePlanPhase runs the plan task for a single file, sending template messages
 // with resolved placeholders and collecting the LLM response as plan guidance.
-func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFiles, rule string) (string, error) {
+func (a *Agent) executePlanPhase(ctx context.Context, sc session.Scope, rawDiff, changeFiles, rule string) (string, error) {
+	newPath := sc.Path()
 	pt := a.args.Template.PlanTask
 	messages := make([]llm.Message, 0, len(pt.Messages))
 	for _, m := range pt.Messages {
@@ -956,7 +963,7 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
-	fs := a.session.GetOrCreateFileSession(newPath)
+	fs := a.session.GetOrCreateScope(sc)
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
 	startTime := time.Now()
 

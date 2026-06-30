@@ -199,7 +199,7 @@ type ViewSession struct {
 	Summary       SessionSummary
 	TokenUsage    TokenUsageSummary
 	SystemPrompts []SystemPrompt // distinct system prompts, deduped by content
-	Files         []*FileGroup   // ordered by file path
+	Units         []*UnitGroup   // review scopes: units first, then file-level passes
 }
 
 // DisplayMessage is one message of an LLM request with its text content
@@ -237,9 +237,14 @@ type FileTokenUsage struct {
 	CacheWriteTokens int
 }
 
-// FileGroup aggregates records for a single file.
-type FileGroup struct {
-	FilePath string
+// UnitGroup aggregates records for one review scope: a Unit (plan/main/
+// compression/relocation), or a file-level pass (review_filter / scan).
+type UnitGroup struct {
+	ID       string   // scope id: unit.ID, or file path for file-level passes
+	Kind     string   // "unit" | "file"
+	Scope    string   // func/file/callchain (units) | filter | scan
+	Paths    []string // member file(s)
+	FilePath string   // representative path
 	Tasks    map[TaskType][]*TaskCard
 }
 
@@ -251,6 +256,7 @@ const (
 	MainTask              TaskType = "main_task"
 	MemoryCompressionTask TaskType = "memory_compression_task"
 	ReLocationTask        TaskType = "re_location_task"
+	ReviewFilterTask      TaskType = "review_filter_task"
 )
 
 // TaskCard links an LLM request with its response and tool calls.
@@ -288,9 +294,41 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	}
 	defer f.Close()
 
-	vs := &ViewSession{Files: make([]*FileGroup, 0)}
-	fileIndex := make(map[string]*FileGroup)
+	vs := &ViewSession{Units: make([]*UnitGroup, 0)}
+	unitIndex := make(map[string]*UnitGroup)
 	sysIndex := make(map[string]int) // system prompt text -> index in vs.SystemPrompts
+
+	// groupFor resolves the UnitGroup a record belongs to, keyed by unit_id
+	// (falling back to filePath for older records that predate unit scoping).
+	groupFor := func(rec map[string]any) *UnitGroup {
+		fp, _ := rec["filePath"].(string)
+		key, _ := rec["unit_id"].(string)
+		if key == "" {
+			key = fp
+		}
+		ug := unitIndex[key]
+		if ug == nil {
+			kind, _ := rec["kind"].(string)
+			if kind == "" {
+				// Legacy records (pre-unit schema) carry no kind: infer from task
+				// type so old sessions still group sensibly — review_filter is the
+				// only file-level task, everything else was per-file main/plan work.
+				if tt, _ := rec["taskType"].(string); tt == string(ReviewFilterTask) {
+					kind = "file"
+				} else {
+					kind = "unit"
+				}
+			}
+			scope, _ := rec["scope"].(string)
+			ug = &UnitGroup{ID: key, Kind: kind, Scope: scope, Paths: stringList(rec["paths"]), FilePath: fp, Tasks: make(map[TaskType][]*TaskCard)}
+			if len(ug.Paths) == 0 && fp != "" {
+				ug.Paths = []string{fp}
+			}
+			unitIndex[key] = ug
+			vs.Units = append(vs.Units, ug)
+		}
+		return ug
+	}
 
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 1024*1024)
@@ -331,7 +369,6 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 
 		case "llm_request":
-			fp, _ := rec["filePath"].(string)
 			tt, _ := rec["taskType"].(string)
 			reqNo := 0
 			if n, ok := rec["request_no"].(float64); ok {
@@ -347,17 +384,10 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 
 			tc := &TaskCard{Request: reqMsgs, RequestNo: reqNo}
-
-			fg := fileIndex[fp]
-			if fg == nil {
-				fg = &FileGroup{FilePath: fp, Tasks: make(map[TaskType][]*TaskCard)}
-				fileIndex[fp] = fg
-				vs.Files = append(vs.Files, fg)
-			}
+			fg := groupFor(rec)
 			fg.Tasks[TaskType(tt)] = append(fg.Tasks[TaskType(tt)], tc)
 
 		case "llm_response":
-			fp, _ := rec["filePath"].(string)
 			content, _ := rec["content"].(string)
 			durationMs := int64(0)
 			if d, ok := rec["duration_ms"].(float64); ok {
@@ -386,7 +416,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 
 			tt, _ := rec["taskType"].(string)
-			fg := fileIndex[fp]
+			fg := groupFor(rec)
 			if fg != nil {
 				cards := fg.Tasks[TaskType(tt)]
 				if len(cards) > 0 && cards[len(cards)-1].ResponseContent == "" {
@@ -423,7 +453,6 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 
 		case "llm_error":
-			fp, _ := rec["filePath"].(string)
 			tt, _ := rec["taskType"].(string)
 			errStr, _ := rec["error"].(string)
 			durationMs := int64(0)
@@ -431,7 +460,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				durationMs = int64(d)
 			}
 
-			fg := fileIndex[fp]
+			fg := groupFor(rec)
 			if fg != nil {
 				cards := fg.Tasks[TaskType(tt)]
 				if len(cards) > 0 && cards[len(cards)-1].Error == "" {
@@ -447,14 +476,12 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			if b, hasOk := rec["ok"].(bool); hasOk {
 				okVal = b
 			}
-			fp, _ := rec["filePath"].(string)
 			tt, _ := rec["taskType"].(string)
 			durationMs := int64(0)
 			if d, ok2 := rec["duration_ms"].(float64); ok2 {
 				durationMs = int64(d)
 			}
-
-			fg := fileIndex[fp]
+			fg := groupFor(rec)
 			if fg != nil {
 				cards := fg.Tasks[TaskType(tt)]
 				if len(cards) > 0 {
@@ -489,10 +516,17 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 		}
 	}
 
-	// Aggregate token usage across all task cards
-	fileBreakdown := make([]FileTokenUsage, 0, len(vs.Files))
-	for _, fg := range vs.Files {
-		ft := FileTokenUsage{FilePath: fg.FilePath}
+	// Aggregate token usage: session totals across all scopes, plus a per-file
+	// rollup (summing across the units that touch each file).
+	fileIdx := make(map[string]*FileTokenUsage)
+	fileOrder := make([]string, 0)
+	for _, fg := range vs.Units {
+		ft := fileIdx[fg.FilePath]
+		if ft == nil {
+			ft = &FileTokenUsage{FilePath: fg.FilePath}
+			fileIdx[fg.FilePath] = ft
+			fileOrder = append(fileOrder, fg.FilePath)
+		}
 		for _, cards := range fg.Tasks {
 			for _, c := range cards {
 				vs.TokenUsage.TotalPromptTokens += c.PromptTokens
@@ -508,19 +542,43 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				ft.CacheWriteTokens += c.CacheWriteTokens
 			}
 		}
-		fileBreakdown = append(fileBreakdown, ft)
+	}
+	fileBreakdown := make([]FileTokenUsage, 0, len(fileOrder))
+	for _, p := range fileOrder {
+		fileBreakdown = append(fileBreakdown, *fileIdx[p])
 	}
 	sort.Slice(fileBreakdown, func(i, j int) bool {
 		return fileBreakdown[i].PromptTokens+fileBreakdown[i].CompletionTokens > fileBreakdown[j].PromptTokens+fileBreakdown[j].CompletionTokens
 	})
 	vs.TokenUsage.FileTokenBreakdown = fileBreakdown
 
-	sort.Slice(vs.Files, func(i, j int) bool {
-		return vs.Files[i].FilePath < vs.Files[j].FilePath
+	// Units first (the review scopes), then file-level passes (review_filter /
+	// scan); stable by id within each kind.
+	sort.SliceStable(vs.Units, func(i, j int) bool {
+		a, b := vs.Units[i], vs.Units[j]
+		if (a.Kind == "unit") != (b.Kind == "unit") {
+			return a.Kind == "unit"
+		}
+		return a.ID < b.ID
 	})
 
 	vs.Summary.SessionID = sessionID
 	return vs, scanner.Err()
+}
+
+// stringList coerces a JSON value (expected []any of strings) into []string.
+func stringList(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, e := range arr {
+		if s, ok := e.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // registerSystemPrompt dedupes a system prompt by exact text, recording which

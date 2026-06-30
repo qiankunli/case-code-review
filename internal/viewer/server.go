@@ -80,6 +80,15 @@ func parseTemplate(name string) (*template.Template, error) {
 		"formatTime":     formatTime,
 		"truncate":       truncateText,
 		"add":            func(a, b int) int { return a + b },
+		"scopesOfKind": func(units []*UnitGroup, kind string) []*UnitGroup {
+			out := make([]*UnitGroup, 0, len(units))
+			for _, u := range units {
+				if u.Kind == kind {
+					out = append(out, u)
+				}
+			}
+			return out
+		},
 		"cardCount": func(tasks map[TaskType][]*TaskCard) int {
 			n := 0
 			for _, cards := range tasks {
@@ -97,6 +106,8 @@ func parseTemplate(name string) (*template.Template, error) {
 				return "task-memory"
 			case ReLocationTask:
 				return "task-relocation"
+			case ReviewFilterTask:
+				return "task-filter"
 			default:
 				return "task-default"
 			}
@@ -105,7 +116,7 @@ func parseTemplate(name string) (*template.Template, error) {
 			Type  TaskType
 			Cards []*TaskCard
 		} {
-			order := []TaskType{PlanTask, MainTask, ReLocationTask, MemoryCompressionTask}
+			order := []TaskType{PlanTask, MainTask, ReLocationTask, MemoryCompressionTask, ReviewFilterTask}
 			var result []struct {
 				Type  TaskType
 				Cards []*TaskCard
@@ -119,7 +130,7 @@ func parseTemplate(name string) (*template.Template, error) {
 				}
 			}
 			for tt, cards := range tasks {
-				if tt != PlanTask && tt != MainTask && tt != ReLocationTask && tt != MemoryCompressionTask {
+				if tt != PlanTask && tt != MainTask && tt != ReLocationTask && tt != MemoryCompressionTask && tt != ReviewFilterTask {
 					result = append(result, struct {
 						Type  TaskType
 						Cards []*TaskCard

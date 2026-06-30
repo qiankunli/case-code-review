@@ -174,7 +174,8 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 // tool calls returned by the model, and collects review comments until
 // task_done is called or limits are reached. Token usage and warnings
 // are aggregated on the Runner across all files.
-func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath string) error {
+func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc session.Scope) error {
+	newPath := sc.Path() // representative path for logging / code_comment anchoring
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
@@ -188,7 +189,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 		toolReqCount--
 
-		fs := r.deps.Session.GetOrCreateFileSession(newPath)
+		fs := r.deps.Session.GetOrCreateScope(sc)
 		rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
 		startTime := time.Now()
 
@@ -233,7 +234,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		hasValidResult := false
 
 		for _, call := range calls {
-			cp := r.executeToolCall(ctx, newPath, call, rec, resp.Alias)
+			cp := r.executeToolCall(ctx, sc, call, rec, resp.Alias)
 			if cp.Completed {
 				results = append(results, tool.ToolCallResult{
 					ToolCallID: call.ID,
@@ -271,7 +272,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			consecutiveEmptyRounds = 0
 		}
 
-		succeed := r.addNextMessage(ctx, content, calls, results, &messages, newPath)
+		succeed := r.addNextMessage(ctx, content, calls, results, &messages, sc)
 		if !succeed {
 			fmt.Fprintf(stdout.Writer(), "[ccr] Context compression exceeded threshold for %s, stopping.\n", newPath)
 			break
@@ -290,7 +291,8 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 // resolution / re-location.
 // alias is the routing alias of the model that produced this tool call's response;
 // it is stamped onto any comments parsed here so multi-model output can be compared.
-func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.ToolCall, rec *session.TaskRecord, alias string) tool.TaskCheckpoint {
+func (r *Runner) executeToolCall(ctx context.Context, sc session.Scope, call llm.ToolCall, rec *session.TaskRecord, alias string) tool.TaskCheckpoint {
+	newPath := sc.Path() // representative path; code_comment anchors to it
 	t := tool.OfName(call.Function.Name)
 	if !t.IsKnown() {
 		return tool.Of(tool.NotAvailableMsg)
@@ -345,7 +347,9 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 						rlStart := time.Now()
 						_, resp, msgs := diff.ReLocateComment(rctx, cm, d, r.deps.LLMClient, r.deps.Template.ReLocationTask, r.deps.Model, r.deps.Template.MaxTokens)
 						if msgs != nil {
-							fs := r.deps.Session.GetOrCreateFileSession(cm.Path)
+							// Re-location happens inside this Unit's review loop, so it
+							// records under the same scope (not the comment's file path).
+							fs := r.deps.Session.GetOrCreateScope(sc)
 							rlRec := fs.AppendTaskRecord(session.ReLocationTask, msgs)
 							if resp != nil {
 								rlRec.SetResponse(resp, time.Since(rlStart))
@@ -414,7 +418,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 // warning (80%) MaxTokens thresholds. Returns false when even after
 // synchronous compression the conversation is still over the warning
 // threshold — caller should stop the loop in that case.
-func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, filePath string) bool {
+func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, sc session.Scope) bool {
 	maxAllowed := r.deps.Template.MaxTokens
 	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
 	warnLimit := int(float64(maxAllowed) * tokenWarningThreshold)
@@ -425,12 +429,12 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 
 	if tokenCount > warnLimit {
 		r.cancelPendingCompression()
-		*messages, _ = r.runCompression(ctx, *messages, filePath)
+		*messages, _ = r.runCompression(ctx, *messages, sc)
 		tokenCount = CountMessagesTokens(*messages)
 	}
 
 	if tokenCount > softLimit && r.pendingJob == nil {
-		r.triggerAsyncCompression(ctx, *messages, filePath)
+		r.triggerAsyncCompression(ctx, *messages, sc)
 	}
 
 	if len(toolCalls) > 0 {
@@ -446,7 +450,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	finalCount := CountMessagesTokens(*messages)
 	if finalCount > warnLimit {
 		r.cancelPendingCompression()
-		*messages, _ = r.runCompression(ctx, *messages, filePath)
+		*messages, _ = r.runCompression(ctx, *messages, sc)
 	}
 
 	return CountMessagesTokens(*messages) < warnLimit
