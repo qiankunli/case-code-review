@@ -169,12 +169,12 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	return uuid
 }
 
-// addScopeFields stamps the scope identity onto a per-record map: unit_id/kind/
+// addScopeFields stamps the scope identity onto a per-record map: scope_id/kind/
 // scope/paths identify the review scope (a Unit, or a file-level pass); filePath
 // is the representative member path, kept for comment anchoring and file rollups.
 func addScopeFields(rec map[string]any, ss *ScopeSession) {
 	rec["filePath"] = ss.Path
-	rec["unit_id"] = ss.ID
+	rec["scope_id"] = ss.ID
 	rec["kind"] = ss.Kind
 	rec["scope"] = ss.Scope
 	rec["paths"] = ss.Paths
