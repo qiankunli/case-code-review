@@ -119,11 +119,12 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 
 	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
 
-	// Non-git directory: `git grep` exits 128 with "not a git repository".
-	// `ocr scan` supports plain directories, so retry in --no-index mode, which
-	// searches the working tree directly while still honoring .gitignore.
-	// Ref-based search needs a real repo, so it is not retried.
-	if err != nil && p.FileReader.Ref == "" && isNotGitRepoError(err, errStr) {
+	// Non-git directory (`ccr scan` supports plain dirs): retry in --no-index
+	// mode, which searches the working tree directly while honoring .gitignore.
+	// We ask git whether this is a work tree rather than parsing its error text
+	// (exit 128 + stderr substrings are locale-dependent and over-match). Skip on
+	// ctx cancellation/timeout, and never retry ref-based search (needs a repo).
+	if err != nil && p.FileReader.Ref == "" && ctx.Err() == nil && !p.insideGitWorkTree(ctx) {
 		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
 		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
 	}
@@ -206,14 +207,22 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	return sb.String(), nil
 }
 
-// isNotGitRepoError reports whether a git grep failure means "not a git
-// repository". Uses git's exit code 128 (locale-independent) rather than matching
-// the English message, which breaks under non-English git locales.
-func isNotGitRepoError(err error, stderr string) bool {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 128 &&
-		(strings.Contains(stderr, "not a git repository") || strings.Contains(stderr, ".git")) {
-		return true
+// insideGitWorkTree reports whether RepoDir sits inside a git work tree. Lets git
+// itself decide repo-ness (locale-independent, exact) so the --no-index fallback
+// is chosen precisely — instead of guessing from exit codes / stderr substrings.
+// Any failure (not a repo, git missing, ctx done) yields false → fall back.
+func (p *CodeSearchProvider) insideGitWorkTree(ctx context.Context) bool {
+	args := []string{"rev-parse", "--is-inside-work-tree"}
+	var out string
+	var err error
+	if p.FileReader.Runner != nil {
+		out, _, err = p.FileReader.Runner.RunSplit(ctx, p.FileReader.RepoDir, args...)
+	} else {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = p.FileReader.RepoDir
+		var b []byte
+		b, err = cmd.Output()
+		out = string(b)
 	}
-	return false
+	return err == nil && strings.TrimSpace(out) == "true"
 }

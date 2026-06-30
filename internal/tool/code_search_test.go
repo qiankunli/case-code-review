@@ -145,6 +145,18 @@ func getHeadCommit(t *testing.T, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func TestInsideGitWorkTree(t *testing.T) {
+	repo := setupTestRepo(t) // git-init'd
+	plain := t.TempDir()     // no git
+
+	if p := NewCodeSearch(&FileReader{RepoDir: repo}); !p.insideGitWorkTree(context.Background()) {
+		t.Error("git-init'd dir should be detected as a work tree")
+	}
+	if p := NewCodeSearch(&FileReader{RepoDir: plain}); p.insideGitWorkTree(context.Background()) {
+		t.Error("plain dir must not be detected as a work tree")
+	}
+}
+
 func TestGitGrep_WorkspaceMode_Found(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
