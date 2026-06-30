@@ -91,6 +91,22 @@
 </ul>
 {{end}}
 
+{{if .Session.SystemPrompts}}
+<h3>System Prompts ({{len .Session.SystemPrompts}})</h3>
+<div class="system-prompts">
+{{range .Session.SystemPrompts}}
+<details class="system-prompt">
+    <summary class="system-prompt-header">
+        <span class="chevron"></span>
+        <span class="system-prompt-label">{{range $i, $t := .TaskTypes}}{{if $i}}, {{end}}{{$t}}{{end}}</span>
+        <span class="system-prompt-meta">system &middot; {{len .Text}} chars</span>
+    </summary>
+    <pre class="msg-text">{{.Text}}</pre>
+</details>
+{{end}}
+</div>
+{{end}}
+
 <h3>Conversations ({{len .Session.Files}} files)</h3>
 <div class="conversations">
 {{range .Session.Files}}
@@ -116,6 +132,22 @@
                     {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
                     {{if .Error}}<span class="badge badge-error">{{.Error}}</span>{{end}}
                 </div>
+                {{if .Request}}
+                <details class="request-section">
+                    <summary class="request-toggle">
+                        <span class="chevron-sm"></span>
+                        <span>Request ({{len .Request}} msg{{if gt (len .Request) 1}}s{{end}})</span>
+                    </summary>
+                    <div class="request-body">
+                        {{range .Request}}
+                        <div class="msg msg-{{.Role}}">
+                            <div class="msg-role">{{.Role}}</div>
+                            <pre class="msg-text">{{.Text}}</pre>
+                        </div>
+                        {{end}}
+                    </div>
+                </details>
+                {{end}}
                 {{with .ResponseContent}}
                 <div class="card-body response-content">
                     <div class="response-text">{{.}}</div>
