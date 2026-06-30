@@ -6,7 +6,119 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+// writeTempConfig marshals cfg to a temp config.json and returns its path.
+func writeTempConfig(t *testing.T, cfg configFile) string {
+	t.Helper()
+	data, _ := json.Marshal(cfg)
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return p
+}
+
+// clearLLMEnv blanks all env that resolution reads, so a test only sees its own config.
+func clearLLMEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"CCR_LLM_URL", "CCR_LLM_TOKEN", "CCR_LLM_MODEL", "CCR_LLM_AUTH_HEADER", "CCR_LLM_TIMEOUT",
+		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
+func arkRoutingConfig(timeoutSec int) configFile {
+	return configFile{
+		CustomProviders: map[string]providerEntryConfig{
+			"ark": {APIKey: "k", URL: "https://ark.example.com/v1/chat/completions", Protocol: "openai", Models: []string{"m1", "m2"}, TimeoutSec: timeoutSec},
+		},
+		Routing: routingConfig{
+			Models: []modelRef{{Provider: "ark", Model: "m1", Alias: "a1"}, {Provider: "ark", Model: "m2", Alias: "a2"}},
+			Policy: "round-robin",
+		},
+	}
+}
+
+func TestResolveEndpoint_LegacyLlmTimeoutSec(t *testing.T) {
+	clearLLMEnv(t)
+	cfgPath := writeTempConfig(t, configFile{Llm: llmFileConfig{
+		URL: "https://api.example.com/v1/messages", AuthToken: "tok", Model: "m", TimeoutSec: 120,
+	}})
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if ep.Timeout != 120*time.Second {
+		t.Errorf("Timeout = %v, want 120s", ep.Timeout)
+	}
+}
+
+func TestResolveModels_CustomProviderTimeoutSecAppliesToAllMembers(t *testing.T) {
+	clearLLMEnv(t)
+	cfgPath := writeTempConfig(t, arkRoutingConfig(90))
+	eps, _, err := ResolveModels(cfgPath)
+	if err != nil {
+		t.Fatalf("resolve models: %v", err)
+	}
+	if len(eps) != 2 {
+		t.Fatalf("want 2 endpoints, got %d", len(eps))
+	}
+	for i, ep := range eps {
+		if ep.Timeout != 90*time.Second {
+			t.Errorf("eps[%d].Timeout = %v, want 90s", i, ep.Timeout)
+		}
+	}
+}
+
+func TestResolveModels_EnvTimeoutOverridesConfig(t *testing.T) {
+	clearLLMEnv(t)
+	t.Setenv("CCR_LLM_TIMEOUT", "30")
+	cfgPath := writeTempConfig(t, arkRoutingConfig(120)) // config says 120, env says 30
+	eps, _, err := ResolveModels(cfgPath)
+	if err != nil {
+		t.Fatalf("resolve models: %v", err)
+	}
+	for i, ep := range eps {
+		if ep.Timeout != 30*time.Second {
+			t.Errorf("eps[%d].Timeout = %v, want 30s (env override)", i, ep.Timeout)
+		}
+	}
+}
+
+func TestResolveModels_NegativeTimeoutSecRejected(t *testing.T) {
+	clearLLMEnv(t)
+	cfgPath := writeTempConfig(t, arkRoutingConfig(-5))
+	if _, _, err := ResolveModels(cfgPath); err == nil {
+		t.Fatal("want error for negative timeout_sec, got nil")
+	}
+}
+
+func TestResolveModels_InvalidEnvTimeoutRejected(t *testing.T) {
+	clearLLMEnv(t)
+	t.Setenv("CCR_LLM_TIMEOUT", "abc")
+	cfgPath := writeTempConfig(t, arkRoutingConfig(0))
+	if _, _, err := ResolveModels(cfgPath); err == nil {
+		t.Fatal("want error for non-integer CCR_LLM_TIMEOUT, got nil")
+	}
+}
+
+func TestResolveModels_NoTimeoutConfigLeavesZero(t *testing.T) {
+	clearLLMEnv(t)
+	cfgPath := writeTempConfig(t, arkRoutingConfig(0))
+	eps, _, err := ResolveModels(cfgPath)
+	if err != nil {
+		t.Fatalf("resolve models: %v", err)
+	}
+	for i, ep := range eps {
+		if ep.Timeout != 0 {
+			t.Errorf("eps[%d].Timeout = %v, want 0 (client default)", i, ep.Timeout)
+		}
+	}
+}
 
 func TestStripModelSuffix(t *testing.T) {
 	tests := []struct {
