@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -195,9 +196,26 @@ func peekSession(path string) (SessionSummary, error) {
 
 // ViewSession holds fully parsed records for one session.
 type ViewSession struct {
-	Summary    SessionSummary
-	TokenUsage TokenUsageSummary
-	Files      []*FileGroup // ordered by file path
+	Summary       SessionSummary
+	TokenUsage    TokenUsageSummary
+	SystemPrompts []SystemPrompt // distinct system prompts, deduped by content
+	Files         []*FileGroup   // ordered by file path
+}
+
+// DisplayMessage is one message of an LLM request with its text content
+// extracted for display (handles both plain-string and content-block formats).
+type DisplayMessage struct {
+	Role string
+	Text string
+}
+
+// SystemPrompt is a distinct system prompt seen in the session. System prompts
+// are static per task type and repeat across every file/round, so the viewer
+// dedupes them by content and surfaces them once at the session level rather
+// than burying a copy inside every request card.
+type SystemPrompt struct {
+	TaskTypes []TaskType // task types this exact prompt was used for
+	Text      string
 }
 
 // TokenUsageSummary aggregates token counts across the session.
@@ -237,7 +255,9 @@ const (
 
 // TaskCard links an LLM request with its response and tool calls.
 type TaskCard struct {
-	RequestMessages  any // preserved for display
+	// Request holds the non-system messages sent in this call (the system prompt
+	// is hoisted to ViewSession.SystemPrompts). This is what the model saw.
+	Request          []DisplayMessage
 	RequestNo        int
 	ResponseContent  string
 	ToolCalls        []ToolCallInfo
@@ -270,6 +290,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
 	fileIndex := make(map[string]*FileGroup)
+	sysIndex := make(map[string]int) // system prompt text -> index in vs.SystemPrompts
 
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 1024*1024)
@@ -316,9 +337,16 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			if n, ok := rec["request_no"].(float64); ok {
 				reqNo = int(n)
 			}
-			msgs := rec["messages"]
+			var reqMsgs []DisplayMessage
+			for _, m := range extractMessages(rec["messages"]) {
+				if m.Role == "system" {
+					registerSystemPrompt(vs, sysIndex, TaskType(tt), m.Text)
+					continue // hoisted to session level; don't repeat in every card
+				}
+				reqMsgs = append(reqMsgs, m)
+			}
 
-			tc := &TaskCard{RequestMessages: msgs, RequestNo: reqNo}
+			tc := &TaskCard{Request: reqMsgs, RequestNo: reqNo}
 
 			fg := fileIndex[fp]
 			if fg == nil {
@@ -493,4 +521,77 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs.Summary.SessionID = sessionID
 	return vs, scanner.Err()
+}
+
+// registerSystemPrompt dedupes a system prompt by exact text, recording which
+// task types reused it. System prompts are static and repeat across every
+// file/round, so the session keeps one entry per distinct text.
+func registerSystemPrompt(vs *ViewSession, idx map[string]int, tt TaskType, text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if i, ok := idx[text]; ok {
+		if !slices.Contains(vs.SystemPrompts[i].TaskTypes, tt) {
+			vs.SystemPrompts[i].TaskTypes = append(vs.SystemPrompts[i].TaskTypes, tt)
+		}
+		return
+	}
+	idx[text] = len(vs.SystemPrompts)
+	vs.SystemPrompts = append(vs.SystemPrompts, SystemPrompt{TaskTypes: []TaskType{tt}, Text: text})
+}
+
+// extractMessages turns the raw JSON `messages` array into display rows, pulling
+// readable text out of each message's content (string or content blocks).
+func extractMessages(raw any) []DisplayMessage {
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]DisplayMessage, 0, len(arr))
+	for _, m := range arr {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		role, _ := mm["role"].(string)
+		out = append(out, DisplayMessage{Role: role, Text: extractContentText(mm["content"])})
+	}
+	return out
+}
+
+// extractContentText mirrors llm.Message.ExtractText for the map-shaped JSON the
+// viewer reads back: content is either a plain string or an array of blocks.
+func extractContentText(c any) string {
+	switch v := c.(type) {
+	case string:
+		return v
+	case []any:
+		var b strings.Builder
+		for _, blk := range v {
+			b.WriteString(extractBlockText(blk))
+		}
+		return b.String()
+	default:
+		return ""
+	}
+}
+
+// extractBlockText pulls text from a single content block, recursing into nested
+// blocks (e.g. a tool_result wrapping text blocks).
+func extractBlockText(blk any) string {
+	bm, ok := blk.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if t, ok := bm["text"].(string); ok && t != "" {
+		return t
+	}
+	if nested, ok := bm["content"].([]any); ok {
+		var b strings.Builder
+		for _, n := range nested {
+			b.WriteString(extractBlockText(n))
+		}
+		return b.String()
+	}
+	return ""
 }

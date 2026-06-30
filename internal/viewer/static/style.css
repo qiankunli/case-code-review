@@ -442,3 +442,72 @@ h3 { margin: 1.5rem 0 0.75rem; color: #24292e; }
 }
 
 p { color: #586069; padding: 1rem 0; }
+
+/* Session-level system prompts (deduped, hoisted out of per-request cards) */
+.system-prompts {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 1.5rem;
+}
+.system-prompt {
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    background: #fff;
+}
+.system-prompt > summary { list-style: none; }
+.system-prompt > summary::-webkit-details-marker { display: none; }
+.system-prompt > summary::marker { display: none; content: ""; }
+.system-prompt-header {
+    cursor: pointer;
+    padding: 0.5rem 0.7rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    user-select: none;
+}
+.system-prompt-header:hover { background: #f6f8fa; }
+.system-prompt[open] > .system-prompt-header .chevron { transform: rotate(45deg); }
+.system-prompt-label { font-weight: 600; font-size: 0.82rem; color: #24292e; }
+.system-prompt-meta { font-size: 0.72rem; color: #8b949e; }
+
+/* Per-request prompt (non-system messages) inside a card */
+.request-section { border-top: 1px solid #eaecef; }
+.request-section > summary { list-style: none; }
+.request-section > summary::-webkit-details-marker { display: none; }
+.request-section > summary::marker { display: none; content: ""; }
+.request-toggle {
+    cursor: pointer;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.78rem;
+    color: #0366d6;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    user-select: none;
+    transition: background 0.12s;
+}
+.request-toggle:hover { background: #f0f6ff; }
+.request-section[open] > .request-toggle .chevron-sm { transform: rotate(45deg); }
+.request-body { padding: 0 0.7rem 0.6rem; }
+.msg { margin-top: 0.4rem; }
+.msg-role {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #8b949e;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.2rem;
+}
+.msg-text {
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.78rem;
+    max-height: 320px;
+    overflow-y: auto;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
