@@ -298,32 +298,15 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	unitIndex := make(map[string]*UnitGroup)
 	sysIndex := make(map[string]int) // system prompt text -> index in vs.SystemPrompts
 
-	// groupFor resolves the UnitGroup a record belongs to, keyed by unit_id
-	// (falling back to filePath for older records that predate unit scoping).
+	// groupFor resolves the UnitGroup a record belongs to, keyed by scope_id.
 	groupFor := func(rec map[string]any) *UnitGroup {
-		fp, _ := rec["filePath"].(string)
-		key, _ := rec["unit_id"].(string)
-		if key == "" {
-			key = fp
-		}
+		key, _ := rec["scope_id"].(string)
 		ug := unitIndex[key]
 		if ug == nil {
 			kind, _ := rec["kind"].(string)
-			if kind == "" {
-				// Legacy records (pre-unit schema) carry no kind: infer from task
-				// type so old sessions still group sensibly — review_filter is the
-				// only file-level task, everything else was per-file main/plan work.
-				if tt, _ := rec["taskType"].(string); tt == string(ReviewFilterTask) {
-					kind = "file"
-				} else {
-					kind = "unit"
-				}
-			}
 			scope, _ := rec["scope"].(string)
+			fp, _ := rec["filePath"].(string)
 			ug = &UnitGroup{ID: key, Kind: kind, Scope: scope, Paths: stringList(rec["paths"]), FilePath: fp, Tasks: make(map[TaskType][]*TaskCard)}
-			if len(ug.Paths) == 0 && fp != "" {
-				ug.Paths = []string{fp}
-			}
 			unitIndex[key] = ug
 			vs.Units = append(vs.Units, ug)
 		}
