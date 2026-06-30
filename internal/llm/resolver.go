@@ -3,10 +3,13 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
@@ -20,6 +23,7 @@ type ResolvedEndpoint struct {
 	ExtraBody  map[string]any // vendor-specific request body fields
 	MaxRetries int            // internal SDK retry budget (0 = SDK default); not read from config — set by NewLLMRouter, low for pool members so a throttled one fails fast to the next
 	Alias      string         // routing alias (routing.models[].alias); stamped onto comments this endpoint produces
+	Timeout    time.Duration  // per-request HTTP timeout; 0 means client default (5 min). A stalled call fails here instead of hanging the whole review.
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -28,8 +32,43 @@ const (
 	envCCRLLMToken      = "CCR_LLM_TOKEN"
 	envCCRLLMModel      = "CCR_LLM_MODEL"
 	envCCRLLMAuthHeader = "CCR_LLM_AUTH_HEADER"
+	envCCRLLMTimeout    = "CCR_LLM_TIMEOUT" // per-request HTTP timeout in seconds; global override over any config timeout_sec
 	envCCRUseAnthropic  = "CCR_USE_ANTHROPIC"
 )
+
+// validateTimeoutSec converts a config/env timeout in seconds to a Duration,
+// rejecting negative values and guarding against time.Duration overflow. 0 means
+// "unset" (the client falls back to its default).
+func validateTimeoutSec(sec int) (time.Duration, error) {
+	if sec == 0 {
+		return 0, nil
+	}
+	if sec < 0 {
+		return 0, fmt.Errorf("timeout_sec must be non-negative, got %d", sec)
+	}
+	if int64(sec) > int64(math.MaxInt64/int64(time.Second)) {
+		return 0, fmt.Errorf("timeout_sec %d overflows time.Duration", sec)
+	}
+	return time.Duration(sec) * time.Second, nil
+}
+
+// parseTimeoutEnv reads CCR_LLM_TIMEOUT (seconds). ok=false (nil err) when unset;
+// a malformed/invalid value is a hard error rather than a silent fallback.
+func parseTimeoutEnv() (time.Duration, bool, error) {
+	raw := strings.TrimSpace(os.Getenv(envCCRLLMTimeout))
+	if raw == "" {
+		return 0, false, nil
+	}
+	sec, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false, fmt.Errorf("%s must be an integer (seconds): %w", envCCRLLMTimeout, err)
+	}
+	d, err := validateTimeoutSec(sec)
+	if err != nil {
+		return 0, false, fmt.Errorf("%s: %w", envCCRLLMTimeout, err)
+	}
+	return d, true, nil
+}
 
 // Environment variable names from Claude Code configuration.
 const (
@@ -71,6 +110,13 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 				ep.Source = s.name
 			}
 			ep.Model = stripModelSuffix(ep.Model)
+			envTimeout, hasEnv, err := parseTimeoutEnv()
+			if err != nil {
+				return ResolvedEndpoint{}, err
+			}
+			if hasEnv { // env is a global override, wins over any config timeout_sec
+				ep.Timeout = envTimeout
+			}
 			return ep, nil
 		}
 	}
@@ -123,6 +169,7 @@ type llmFileConfig struct {
 	AuthHeader   string         `json:"auth_header,omitempty"`
 	Model        string         `json:"model,omitempty"`
 	UseAnthropic *bool          `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
+	TimeoutSec   int            `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds (0 = client default)
 	ExtraBody    map[string]any `json:"extra_body,omitempty"`
 }
 
@@ -134,6 +181,7 @@ type providerEntryConfig struct {
 	Model      string         `json:"model,omitempty"`
 	Models     []string       `json:"models,omitempty"`
 	AuthHeader string         `json:"auth_header,omitempty"`
+	TimeoutSec int            `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds (0 = client default)
 	ExtraBody  map[string]any `json:"extra_body,omitempty"`
 }
 
@@ -249,11 +297,18 @@ func ResolveModelsWithModelOverride(configPath, modelOverride string) ([]Resolve
 			if policy != policyPriority && policy != policyRoundRobin {
 				return nil, "", fmt.Errorf("unsupported routing.policy %q (want %q or %q)", policy, policyPriority, policyRoundRobin)
 			}
+			envTimeout, hasEnv, err := parseTimeoutEnv()
+			if err != nil {
+				return nil, "", err
+			}
 			eps := make([]ResolvedEndpoint, 0, len(cfg.Routing.Models))
 			for _, ref := range cfg.Routing.Models {
 				ep, err := resolveModelRef(cfg, ref)
 				if err != nil {
 					return nil, "", err
+				}
+				if hasEnv { // env is a global override across the whole routing pool
+					ep.Timeout = envTimeout
 				}
 				eps = append(eps, ep)
 			}
@@ -381,6 +436,11 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		url = ensureMessagesSuffix(url)
 	}
 
+	timeout, err := validateTimeoutSec(entry.TimeoutSec)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+	}
+
 	return ResolvedEndpoint{
 		URL:        url,
 		Token:      apiKey,
@@ -389,6 +449,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		AuthHeader: authHeader,
 		Source:     "provider:" + cfg.Provider,
 		ExtraBody:  extraBody,
+		Timeout:    timeout,
 	}, true, nil
 }
 
@@ -424,7 +485,12 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody}, true, nil
+	timeout, err := validateTimeoutSec(cfg.Llm.TimeoutSec)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+	}
+
+	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, Timeout: timeout}, true, nil
 }
 
 // tryCCEnv reads Claude Code environment variables.
