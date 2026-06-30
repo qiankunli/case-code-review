@@ -202,6 +202,7 @@ func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 		APIKey:     ep.Token,
 		Model:      ep.Model,
 		AuthHeader: ep.AuthHeader,
+		Timeout:    ep.Timeout,
 		ExtraBody:  ep.ExtraBody,
 		MaxRetries: ep.MaxRetries,
 	}
