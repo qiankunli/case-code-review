@@ -105,8 +105,16 @@ func Names() []string {
 }
 
 // Describe returns "name  (default on/off)  desc" lines for CLI help, sorted.
+// Column width is computed from the registry so adding a longer gate name never
+// silently misaligns the help output.
 func Describe() []string {
 	names := Names()
+	maxW := 0
+	for _, n := range names {
+		if len(n) > maxW {
+			maxW = len(n)
+		}
+	}
 	out := make([]string, 0, len(names))
 	for _, n := range names {
 		d := registry[Gate(n)]
@@ -114,7 +122,7 @@ func Describe() []string {
 		if !d.Default {
 			state = "off"
 		}
-		out = append(out, fmt.Sprintf("%-14s (default %s)  %s", n, state, d.Desc))
+		out = append(out, fmt.Sprintf("%-*s (default %s)  %s", maxW, n, state, d.Desc))
 	}
 	return out
 }
