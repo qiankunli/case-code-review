@@ -28,6 +28,10 @@ type Case struct {
 
 // Entry is the spec + cases bound to one code symbol.
 type Entry struct {
+	// Fqn is the symbol's language-native fully-qualified name (Python dotted
+	// import path, Go importpath.Symbol). Present on entries from dependency
+	// spec.json; the cross-repo identity a reference resolves to. May be empty.
+	Fqn   string   `json:"fqn,omitempty"`
 	Spec  string   `json:"spec,omitempty"`
 	Cases []Case   `json:"cases,omitempty"`
 	Links []string `json:"links,omitempty"`
@@ -61,6 +65,15 @@ func Load(repoDir, customPath string) (Index, error) {
 	found := false
 
 	// Load low → high so higher layers win on key collision.
+	// Dependency spec.json (shipped inside installed deps) is the lowest layer:
+	// local spec always overrides a dependency's on key collision. Best-effort —
+	// dependency discovery never fails a review.
+	if repoDir != "" {
+		if dep := loadDepSpecs(repoDir); len(dep) > 0 {
+			mergeInto(merged, dep)
+			found = true
+		}
+	}
 	if home, err := os.UserHomeDir(); err == nil {
 		if err := mergeOptional(merged, filepath.Join(home, ".casecodereview", "spec.json"), &found); err != nil {
 			return nil, err
