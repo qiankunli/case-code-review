@@ -10,10 +10,10 @@ import (
 // (spec/rule/link/history) and the two costly ones (caller/callee) when on;
 // disabled clue kinds drop their finder entirely.
 func TestNew_ClueGatesControlFinderAssembly(t *testing.T) {
-	// cheap finders = 4 gated (spec/rule/link/history) + 2 always-on (reference, depdoc).
+	// cheap finders = 4 gated (spec/rule/link/history) + 3 always-on (reference, depdoc, owner).
 	full := New(Args{}) // nil Features → all gates on
-	if len(full.finders) != 6 {
-		t.Errorf("all-on: want 6 cheap finders (spec/rule/link/history + reference + depdoc), got %d", len(full.finders))
+	if len(full.finders) != 7 {
+		t.Errorf("all-on: want 7 cheap finders (spec/rule/link/history + reference + depdoc + owner), got %d", len(full.finders))
 	}
 	if len(full.costlyFinders) != 2 {
 		t.Errorf("all-on: want 2 costly finders (caller/callee), got %d", len(full.costlyFinders))
@@ -30,7 +30,7 @@ func TestNew_ClueGatesControlFinderAssembly(t *testing.T) {
 	if len(a.costlyFinders) != 0 {
 		t.Errorf("caller_callee off: want 0 costly finders, got %d", len(a.costlyFinders))
 	}
-	if len(a.finders) != 5 { // rule, link, history (gated) + reference + depdoc (always-on)
-		t.Errorf("spec_case off: want 5 cheap finders, got %d", len(a.finders))
+	if len(a.finders) != 6 { // rule, link, history (gated) + reference + depdoc + owner (always-on)
+		t.Errorf("spec_case off: want 6 cheap finders, got %d", len(a.finders))
 	}
 }
