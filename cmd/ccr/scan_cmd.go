@@ -156,7 +156,8 @@ func runScan(args []string) error {
 		return runScanPreview(cc, scanTpl, scanPaths)
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	// TODO: wire --feature gates into scan (routing hardcoded on for now; review has them).
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model, true)
 	if err != nil {
 		return err
 	}

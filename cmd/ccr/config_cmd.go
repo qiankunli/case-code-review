@@ -174,6 +174,9 @@ type Config struct {
 	Llm             LlmConfig                `json:"llm,omitempty"`
 	Language        string                   `json:"language,omitempty"`
 	Telemetry       *TelemetryConfig         `json:"telemetry,omitempty"`
+	// Features holds feature-gate defaults (gate name -> on/off), overridden by
+	// CCR_FEATURES env and --feature CLI. See internal/feature.
+	Features map[string]bool `json:"features,omitempty"`
 }
 
 type LlmConfig struct {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/agent"
+	"github.com/qiankunli/case-code-review/internal/feature"
 	"github.com/qiankunli/case-code-review/internal/history"
 	"github.com/qiankunli/case-code-review/internal/spec"
 	"github.com/qiankunli/case-code-review/internal/telemetry"
@@ -51,7 +52,11 @@ func runReview(args []string) error {
 		return runDryRun(cc, opts)
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	features, err := resolveFeatures(opts.features)
+	if err != nil {
+		return err
+	}
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model, features.Enabled(feature.Routing))
 	if err != nil {
 		return err
 	}
@@ -98,6 +103,7 @@ func runReview(args []string) error {
 		SpecIndex:             specIndex,
 		HistoryIndex:          historyIndex,
 		GitRunner:             cc.GitRunner,
+		Features:              features,
 	})
 
 	// Silence progress output during execution; restored before the trace
@@ -210,6 +216,10 @@ func runDryRun(cc *commonContext, opts reviewOptions) error {
 	if err != nil {
 		return fmt.Errorf("load history: %w", err)
 	}
+	features, err := resolveFeatures(opts.features)
+	if err != nil {
+		return err
+	}
 	ag := agent.New(agent.Args{
 		RepoDir:      cc.RepoDir,
 		From:         opts.from,
@@ -221,6 +231,7 @@ func runDryRun(cc *commonContext, opts reviewOptions) error {
 		HistoryIndex: historyIndex,
 		SystemRule:   cc.Resolver,
 		Background:   opts.background,
+		Features:     features,
 	})
 
 	preview, units, err := ag.DryRun(context.Background())
@@ -228,7 +239,7 @@ func runDryRun(cc *commonContext, opts reviewOptions) error {
 		return fmt.Errorf("dry-run failed: %w", err)
 	}
 	if opts.outputFormat == "json" {
-		return outputDryRunJSON(preview, units)
+		return outputDryRunJSON(preview, units, features.Resolved())
 	}
 	outputPreviewText(preview) // which files are reviewed/excluded (the --preview view)
 	outputDryRunText(units)    // each unit's assembled context
