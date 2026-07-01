@@ -1,22 +1,28 @@
 package spec
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
-// OwnerFinder yields the spec/case/rule/link of a changed method's (or nested
-// func's) *enclosing* symbol — its class/type, or outer func. Without it, a
-// class-level marker only fires when the whole class is the changed symbol, which
-// almost never happens; changing `Svc.create` must still surface class `Svc`'s
-// class-level @rule ("Svc is per-request — do not cache"). This is the enclosing
-// (owner) axis, distinct from the changed symbol's own markers (SpecFinder et al).
+// OwnerFinder yields the spec/case/rule/link and docstring of a changed method's
+// (or nested func's) *enclosing* symbol — its class/type, or outer func. Without
+// it, a class-level marker only fires when the whole class is the changed symbol,
+// which almost never happens; changing `Svc.create` must still surface class
+// `Svc`'s class-level @rule ("Svc is per-request — do not cache") and its
+// docstring. This is the enclosing (owner) axis, distinct from the changed
+// symbol's own markers (SpecFinder et al).
 //
 // The enclosing symbol-id is the changed symbol-id with its trailing `.segment`
 // stripped (`a::C.m` → `a::C`, Go `a::Recv.Method` → `a::Recv`); a top-level
 // symbol (no dot in the symbol part) has no owner.
-type OwnerFinder struct{ Index Index }
+type OwnerFinder struct {
+	Index   Index
+	RepoDir string // for reading the enclosing type's docstring from source (adoption-free)
+}
 
 func (f OwnerFinder) Find(u unit.Unit) []unit.Clue {
 	own := make(map[string]bool, len(u.AllSymbols()))
@@ -46,8 +52,34 @@ func (f OwnerFinder) Find(u unit.Unit) []unit.Clue {
 			}
 			clues = append(clues, unit.Clue{Kind: unit.ClueLink, Relation: unit.RelOwner, Text: l + " (" + kind + ")", Ref: l})
 		}
+		if doc := ownerDocstring(f.RepoDir, owner); doc != "" {
+			clues = append(clues, unit.Clue{
+				Kind:     unit.ClueDoc,
+				Relation: unit.RelOwner,
+				Text:     "enclosing type `" + name + "` (docstring): " + doc,
+				Ref:      owner,
+			})
+		}
 	}
 	return clues
+}
+
+// ownerDocstring reads the enclosing type's docstring from its source file in the
+// repo (adoption-free — no marker needed). Python-only for now; "" when the file
+// isn't Python, isn't readable, or the symbol has no docstring.
+func ownerDocstring(repoDir, ownerID string) string {
+	if repoDir == "" {
+		return ""
+	}
+	rel, name, ok := strings.Cut(ownerID, "::")
+	if !ok || !strings.HasSuffix(rel, ".py") {
+		return ""
+	}
+	src, err := os.ReadFile(filepath.Join(repoDir, rel))
+	if err != nil {
+		return ""
+	}
+	return extractPyDocstring(string(src), name)
 }
 
 // enclosingSymbol returns the symbol-id of id's immediate enclosing symbol
