@@ -136,6 +136,9 @@ func NewAgent(args Args) *Agent {
 		CommentCollector:  args.CommentCollector,
 		CommentWorkerPool: args.CommentWorkerPool,
 		Session:           args.Session,
+		// Scan has no feature-gate wiring yet; relocation stays on (its prior
+		// behavior — fires whenever the scan template maps ReLocationTask).
+		RelocationEnabled: true,
 		// DiffLookup returns a synthetic Diff so the code_comment tool's
 		// line-number resolver (resolveFromFileContent) can match against
 		// the full file content of the scanned file.
