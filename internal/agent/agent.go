@@ -202,6 +202,9 @@ func New(args Args) *Agent {
 	// usage rule when the diff uses that type, a correctness signal not worth
 	// gating; it's cheap (diff scan + map lookup, no LLM/grep). See docs/spec-aware-review.md.
 	finders = append(finders, spec.NewReferenceFinder(args.SpecIndex))
+	// DepDocFinder surfaces a referenced type's docstring (incl. dependency source)
+	// — adoption-free contract context, no markers needed. Cheap (a few file reads).
+	finders = append(finders, spec.DepDocFinder{RepoDir: args.RepoDir})
 	var costlyFinders []unit.ClueFinder
 	if f.Enabled(feature.CallerCallee) {
 		costlyFinders = append(costlyFinders,
@@ -629,6 +632,10 @@ func renderClues(clues []unit.Clue) (specCases, rules, seeAlso, priorFindings st
 			// referenced name so the reviewer knows it's about the used type, not
 			// the changed function.
 			ruleLines = append(ruleLines, "- (used type `"+c.Ref+"`) "+c.Text)
+		case unit.ClueDoc:
+			// Docstring of a referenced type (often a dependency). Contract-ish
+			// context, but lower-signal than a curated spec — label it as a docstring.
+			specBlocks = append(specBlocks, "used type `"+c.Ref+"` (docstring): "+c.Text)
 		case unit.ClueLink:
 			linkLines = append(linkLines, "- "+c.Text)
 		case unit.ClueHistory:
