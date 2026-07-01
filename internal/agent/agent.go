@@ -205,6 +205,10 @@ func New(args Args) *Agent {
 	// DepDocFinder surfaces a referenced type's docstring (incl. dependency source)
 	// — adoption-free contract context, no markers needed. Cheap (a few file reads).
 	finders = append(finders, spec.DepDocFinder{RepoDir: args.RepoDir})
+	// OwnerFinder surfaces the enclosing type's markers when a *method* changes —
+	// so a class-level @rule fires on method edits (else it never would). Cheap
+	// (symbol-id derivation + Index lookup). Always on. See docs/context-model.md.
+	finders = append(finders, spec.OwnerFinder{Index: args.SpecIndex})
 	var costlyFinders []unit.ClueFinder
 	if f.Enabled(feature.CallerCallee) {
 		costlyFinders = append(costlyFinders,
