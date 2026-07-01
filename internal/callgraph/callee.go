@@ -34,9 +34,10 @@ func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
 	}
 	return walkForSpecs(f.Index, u.AllSymbols(), f.callees, f.Depth, max, func(id string) unit.Clue {
 		return unit.Clue{
-			Kind: unit.ClueCallee,
-			Text: "(depends on callee " + id + ", which guarantees)\n" + f.Index.Render([]string{id}),
-			Ref:  id,
+			Kind:     unit.ClueSpec,
+			Relation: unit.RelCallee,
+			Text:     "(depends on callee " + id + ", which guarantees)\n" + f.Index.Render([]string{id}),
+			Ref:      id,
 		}
 	})
 }

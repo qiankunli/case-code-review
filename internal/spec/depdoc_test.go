@@ -3,6 +3,7 @@ package spec
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/qiankunli/case-code-review/internal/unit"
@@ -68,10 +69,10 @@ func TestDepDocFinder_ReadsDependencyDocstring(t *testing.T) {
 		Diff:    "+    return PhaseEventMiddleware()\n",
 	})
 	clues := DepDocFinder{RepoDir: repo}.Find(u)
-	if len(clues) != 1 || clues[0].Kind != unit.ClueDoc ||
+	if len(clues) != 1 || clues[0].Kind != unit.ClueDoc || clues[0].Relation != unit.RelUsed ||
 		clues[0].Ref != "framework.middleware.trace.PhaseEventMiddleware" ||
-		clues[0].Text != "Per-request only — do not cache/reuse." {
-		t.Fatalf("want one ClueDoc from the dependency docstring, got %+v", clues)
+		!strings.Contains(clues[0].Text, "Per-request only — do not cache/reuse.") {
+		t.Fatalf("want one used-relation doc clue from the dependency docstring, got %+v", clues)
 	}
 }
 

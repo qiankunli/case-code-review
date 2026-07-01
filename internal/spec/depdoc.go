@@ -69,7 +69,13 @@ func (f DepDocFinder) Find(u unit.Unit) []unit.Clue {
 			continue
 		}
 		if doc := extractPyDocstring(string(src), sym.name); doc != "" {
-			clues = append(clues, unit.Clue{Kind: unit.ClueDoc, Text: doc, Ref: sym.module + "." + sym.name})
+			ref := sym.module + "." + sym.name
+			clues = append(clues, unit.Clue{
+				Kind:     unit.ClueDoc,
+				Relation: unit.RelUsed,
+				Text:     "used type `" + ref + "` (docstring): " + doc,
+				Ref:      ref,
+			})
 		}
 	}
 	return clues

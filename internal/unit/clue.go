@@ -1,46 +1,54 @@
 package unit
 
-// ClueKind identifies what kind of review context a Clue carries.
+// A review unit's context is assembled on two orthogonal axes (see
+// docs/context-model.md): the Relation (which related symbol a clue came from)
+// and the Clue's Kind (what evidence it is). Keeping them separate lets dry-run
+// report a relation×kind matrix and lets a clue be labelled by how it was reached.
+
+// ClueKind is what evidence a Clue carries — independent of how it was reached.
 type ClueKind string
 
 const (
-	ClueSpec ClueKind = "spec" // contract + cases bound to the function
-	ClueRule ClueKind = "rule" // function-level review criteria (@rule)
+	ClueSpec ClueKind = "spec" // contract + cases bound to the symbol (spec.json)
+	ClueRule ClueKind = "rule" // review criterion (@rule)
 	ClueLink ClueKind = "link" // curated see-also pointer (@link)
-	// Reserved for a future call-graph finder; not emitted yet.
-	ClueCaller ClueKind = "caller"
-	ClueCallee ClueKind = "callee"
-	// ClueHistory carries a prior review's findings on this unit, so the reviewer
+	ClueDoc  ClueKind = "doc"  // symbol docstring, read from source (adoption-free)
+	// ClueHistory carries a prior review's findings on this symbol, so the reviewer
 	// can judge whether the current change addresses them (the review-history
-	// feedback loop — a per-unit input alongside spec/rule).
+	// feedback loop).
 	ClueHistory ClueKind = "history"
-	// ClueRef carries a rule from a symbol the diff *references* (not the changed
-	// symbol itself) — e.g. a type used in the change whose class-level @rule is a
-	// usage constraint ("per-request only"). Reference axis, not the own-symbol axis.
-	ClueRef ClueKind = "ref"
-	// ClueDoc carries the docstring of a symbol the diff references, read on demand
-	// from its (possibly dependency) source. Adoption-free contract context: works
-	// for any documented dependency without spec-case markers. Lower-signal than a
-	// curated spec/rule, so it's labelled as a docstring for the reviewer to weigh.
-	ClueDoc ClueKind = "doc"
 )
 
-// Clue is one piece of context found for a review Unit — a contract, a review
-// rule, a see-also pointer, a caller, etc. Text is the inline content shown to
-// the reviewer; Ref is an optional pointer (a doc path or a symbol-id) to fetch on
-// demand, left empty when the clue is fully inline. Finding is separated from
-// rendering: a ClueFinder produces Clues, the review prompt renders them.
+// Relation is how the symbol a clue came from connects to the changed unit.
+type Relation string
+
+const (
+	RelSelf   Relation = "self"   // the changed symbol itself
+	RelOwner  Relation = "owner"  // its enclosing type/func (a method's class)
+	RelCaller Relation = "caller" // a caller (upstream to the governing spec)
+	RelCallee Relation = "callee" // a callee (a depended-on contract)
+	RelUsed   Relation = "used"   // a type/func the diff references
+)
+
+// Clue is one piece of review context reached for a Unit: a contract, a review
+// rule, a see-also pointer, a docstring, etc. Kind is what it is; Relation is how
+// it was reached; Text is the inline content; Ref is an optional pointer (a doc
+// path or symbol-id) to fetch on demand. Finding is separated from rendering: a
+// ClueFinder produces Clues, the review prompt renders them.
 type Clue struct {
-	Kind ClueKind
-	Text string
-	Ref  string
+	Kind     ClueKind
+	Relation Relation
+	Text     string
+	Ref      string
 }
 
-// ClueFinder finds the Clues relevant to reviewing one Unit. There is one
-// implementation per context source — spec/rule/link from spec.json today, and
-// later caller/callee from a call graph. Returning nil is fine. An expensive
-// finder's bounding strategy (e.g. how far to walk callers) lives inside the
-// finder, not in this interface, so adding caller/callee needs no change here.
+// Dossier is a Unit's assembled, deduped set of Clues — the review loop's evidence
+// input (docs/context-model.md).
+type Dossier = []Clue
+
+// ClueFinder finds the Clues relevant to reviewing one Unit — one implementation
+// per (relation, source) it covers. Returning nil is fine. An expensive finder's
+// bounding strategy (e.g. how far to walk callers) lives inside the finder.
 type ClueFinder interface {
 	Find(u Unit) []Clue
 }

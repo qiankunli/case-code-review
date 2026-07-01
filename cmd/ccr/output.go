@@ -306,7 +306,7 @@ type dryRunMetrics struct {
 	ScopeCounts    map[string]int `json:"scope_counts"`     // func / file / callchain -> #units
 	CrossFileUnits int            `json:"cross_file_units"` // units spanning >1 file (call-chain effect)
 	FragmentsTotal int            `json:"fragments_total"`  // total changed regions across units
-	ClueCoverage   map[string]int `json:"clue_coverage"`    // clue kind -> #units carrying >=1 of it
+	ClueCoverage   map[string]int `json:"clue_coverage"`    // "<relation>/<kind>" -> #units carrying >=1 (the relation×kind matrix)
 }
 
 type dryRunJSON struct {
@@ -332,9 +332,9 @@ func outputDryRunJSON(preview *agent.DiffPreview, units []agent.UnitContext, fea
 			m.CrossFileUnits++
 		}
 		m.FragmentsTotal += u.Fragments
-		for kind, n := range u.Clues {
+		for cell, n := range u.Clues { // cell = "<relation>/<kind>"
 			if n > 0 {
-				m.ClueCoverage[kind]++
+				m.ClueCoverage[cell]++
 			}
 		}
 	}
