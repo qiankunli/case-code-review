@@ -30,6 +30,9 @@ type Deps struct {
 	CommentCollector  *tool.CommentCollector
 	CommentWorkerPool *CommentWorkerPool
 	Session           *session.SessionHistory
+	// RelocationEnabled gates the LLM re-location sub-call (ablation feature gate).
+	// When false, an unresolved comment keeps its model-reported line (no extra LLM).
+	RelocationEnabled bool
 	// DiffLookup is consulted by the code_comment tool path to resolve
 	// line numbers against the file's diff (or against full file content
 	// in scan mode — scan adapters return a synthetic Diff whose
@@ -343,7 +346,7 @@ func (r *Runner) executeToolCall(ctx context.Context, sc session.Scope, call llm
 					d = r.deps.DiffLookup(cm.Path)
 				}
 				if d != nil {
-					if !diff.ResolveComment(cm, d) && r.deps.Template.ReLocationTask != nil {
+					if !diff.ResolveComment(cm, d) && r.deps.RelocationEnabled && r.deps.Template.ReLocationTask != nil {
 						rlStart := time.Now()
 						_, resp, msgs := diff.ReLocateComment(rctx, cm, d, r.deps.LLMClient, r.deps.Template.ReLocationTask, r.deps.Model, r.deps.Template.MaxTokens)
 						if msgs != nil {
