@@ -32,7 +32,7 @@ func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
 	if max <= 0 {
 		max = defaultMaxResults
 	}
-	return walkForSpecs(f.Index, u.AllSymbols(), f.callees, f.Depth, max, func(id string) unit.Clue {
+	return walkForSpecs(f.Index, u.AllSymbols(), f.callees, f.Depth, max, f.RepoDir, unit.RelCallee, "callee", func(id string) unit.Clue {
 		return unit.Clue{
 			Kind:     unit.ClueSpec,
 			Relation: unit.RelCallee,

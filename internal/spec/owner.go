@@ -52,7 +52,7 @@ func (f OwnerFinder) Find(u unit.Unit) []unit.Clue {
 			}
 			clues = append(clues, unit.Clue{Kind: unit.ClueLink, Relation: unit.RelOwner, Text: l + " (" + kind + ")", Ref: l})
 		}
-		if doc := ownerDocstring(f.RepoDir, owner); doc != "" {
+		if doc := SymbolDocstring(f.RepoDir, owner); doc != "" {
 			clues = append(clues, unit.Clue{
 				Kind:     unit.ClueDoc,
 				Relation: unit.RelOwner,
@@ -64,14 +64,15 @@ func (f OwnerFinder) Find(u unit.Unit) []unit.Clue {
 	return clues
 }
 
-// ownerDocstring reads the enclosing type's docstring from its source file in the
-// repo (adoption-free — no marker needed). Python-only for now; "" when the file
-// isn't Python, isn't readable, or the symbol has no docstring.
-func ownerDocstring(repoDir, ownerID string) string {
+// SymbolDocstring reads a symbol's docstring from its source file in the repo
+// (adoption-free — no marker needed), given its symbol-id `<relpath>::<name>`.
+// Python-only for now; "" when the file isn't Python, isn't readable, or the
+// symbol has no docstring. Shared by the owner and caller/callee relations.
+func SymbolDocstring(repoDir, symbolID string) string {
 	if repoDir == "" {
 		return ""
 	}
-	rel, name, ok := strings.Cut(ownerID, "::")
+	rel, name, ok := strings.Cut(symbolID, "::")
 	if !ok || !strings.HasSuffix(rel, ".py") {
 		return ""
 	}

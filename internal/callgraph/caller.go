@@ -47,7 +47,7 @@ func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
 	if max <= 0 {
 		max = defaultMaxResults
 	}
-	return walkForSpecs(f.Index, u.AllSymbols(), f.callers, f.Depth, max, func(id string) unit.Clue {
+	return walkForSpecs(f.Index, u.AllSymbols(), f.callers, f.Depth, max, f.RepoDir, unit.RelCaller, "caller", func(id string) unit.Clue {
 		return unit.Clue{
 			Kind:     unit.ClueSpec,
 			Relation: unit.RelCaller,
