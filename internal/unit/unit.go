@@ -53,9 +53,10 @@ type Unit struct {
 	// Fragments are the changed regions reviewed together (one for a function or
 	// file Unit; several across files for a call-chain Unit).
 	Fragments []Fragment
-	// Clues are the context pieces ClueFinders found for this Unit (spec, rule,
-	// link, caller/callee, history), gathered post-merge against AllSymbols.
-	Clues []Clue
+	// Dossier is the deduped set of Clues assembled for this Unit (spec/rule/link/
+	// doc/history across the self/owner/caller/callee/used relations), gathered
+	// post-merge against AllSymbols. See docs/context-model.md.
+	Dossier Dossier
 }
 
 // AllSymbols returns every symbol-id this Unit covers across its Fragments — the

@@ -63,9 +63,10 @@ func (f Finder) Find(u unit.Unit) []unit.Clue {
 			continue
 		}
 		clues = append(clues, unit.Clue{
-			Kind: unit.ClueHistory,
-			Text: render(sym, fs),
-			Ref:  sym,
+			Kind:     unit.ClueHistory,
+			Relation: unit.RelSelf,
+			Text:     render(sym, fs),
+			Ref:      sym,
 		})
 	}
 	return clues
