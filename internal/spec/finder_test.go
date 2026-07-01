@@ -41,9 +41,44 @@ func TestFinders(t *testing.T) {
 func TestFindersNilAndUnknownSafe(t *testing.T) {
 	var nilIdx Index
 	u := unit.UnitOf(unit.Fragment{Path: "x", Symbols: []string{"x::Unknown"}})
-	for _, f := range []unit.ClueFinder{SpecFinder{nilIdx}, RuleFinder{nilIdx}, LinkFinder{nilIdx}} {
+	for _, f := range []unit.ClueFinder{SpecFinder{nilIdx}, RuleFinder{nilIdx}, LinkFinder{nilIdx}, NewReferenceFinder(nilIdx)} {
 		if got := f.Find(u); got != nil {
 			t.Errorf("nil index should find nothing, got %+v", got)
 		}
+	}
+}
+
+func TestReferenceFinder(t *testing.T) {
+	idx, err := Parse([]byte(`{
+	  "mw/trace.go::PhaseEventMiddleware": { "cases": [], "rules": ["per-request only — do not cache/reuse"] },
+	  "handler.go::NewHandler": { "cases": [], "rules": ["own rule"] }
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rf := NewReferenceFinder(idx)
+
+	// A unit that USES PhaseEventMiddleware picks up its class rule, even though
+	// the middleware's own definition isn't in this diff.
+	u := unit.UnitOf(unit.Fragment{
+		Path:    "handler.go",
+		Symbols: []string{"handler.go::NewHandler"},
+		Diff:    "+\tmw := PhaseEventMiddleware()\n",
+	})
+	clues := rf.Find(u)
+	if len(clues) != 1 || clues[0].Kind != unit.ClueRef || clues[0].Ref != "PhaseEventMiddleware" ||
+		!strings.Contains(clues[0].Text, "per-request only") {
+		t.Fatalf("want one ClueRef for PhaseEventMiddleware, got %+v", clues)
+	}
+
+	// The unit's OWN symbol appearing in its own diff must not self-inject —
+	// SpecFinder/RuleFinder already cover own symbols.
+	own := unit.UnitOf(unit.Fragment{
+		Path:    "handler.go",
+		Symbols: []string{"handler.go::NewHandler"},
+		Diff:    "+func NewHandler() {}\n",
+	})
+	if got := rf.Find(own); got != nil {
+		t.Errorf("own symbol should not self-inject, got %+v", got)
 	}
 }

@@ -198,6 +198,10 @@ func New(args Args) *Agent {
 	if f.Enabled(feature.History) {
 		finders = append(finders, history.Finder{Index: args.HistoryIndex})
 	}
+	// ReferenceFinder (referenced-type rules) is always on — it honors an authored
+	// usage rule when the diff uses that type, a correctness signal not worth
+	// gating; it's cheap (diff scan + map lookup, no LLM/grep). See docs/spec-aware-review.md.
+	finders = append(finders, spec.NewReferenceFinder(args.SpecIndex))
 	var costlyFinders []unit.ClueFinder
 	if f.Enabled(feature.CallerCallee) {
 		costlyFinders = append(costlyFinders,
@@ -620,6 +624,11 @@ func renderClues(clues []unit.Clue) (specCases, rules, seeAlso, priorFindings st
 			specBlocks = append(specBlocks, c.Text)
 		case unit.ClueRule:
 			ruleLines = append(ruleLines, "- "+c.Text)
+		case unit.ClueRef:
+			// A rule from a type the diff uses (usage constraint). Label with the
+			// referenced name so the reviewer knows it's about the used type, not
+			// the changed function.
+			ruleLines = append(ruleLines, "- (used type `"+c.Ref+"`) "+c.Text)
 		case unit.ClueLink:
 			linkLines = append(linkLines, "- "+c.Text)
 		case unit.ClueHistory:
