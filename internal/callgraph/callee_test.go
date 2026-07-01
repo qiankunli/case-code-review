@@ -25,7 +25,7 @@ func TestCalleeFinder_DependsOnCalleeSpec(t *testing.T) {
 	if len(clues) != 1 {
 		t.Fatalf("want 1 callee clue, got %d: %+v", len(clues), clues)
 	}
-	if clues[0].Kind != unit.ClueCallee || clues[0].Ref != "validate.go::validate" ||
+	if clues[0].Kind != unit.ClueSpec || clues[0].Relation != unit.RelCallee || clues[0].Ref != "validate.go::validate" ||
 		!strings.Contains(clues[0].Text, "rejects an empty tenant") {
 		t.Errorf("clue off: %+v", clues[0])
 	}

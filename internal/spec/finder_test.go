@@ -66,9 +66,9 @@ func TestReferenceFinder(t *testing.T) {
 		Diff:    "+\tmw := PhaseEventMiddleware()\n",
 	})
 	clues := rf.Find(u)
-	if len(clues) != 1 || clues[0].Kind != unit.ClueRef || clues[0].Ref != "PhaseEventMiddleware" ||
-		!strings.Contains(clues[0].Text, "per-request only") {
-		t.Fatalf("want one ClueRef for PhaseEventMiddleware, got %+v", clues)
+	if len(clues) != 1 || clues[0].Kind != unit.ClueRule || clues[0].Relation != unit.RelUsed ||
+		clues[0].Ref != "PhaseEventMiddleware" || !strings.Contains(clues[0].Text, "per-request only") {
+		t.Fatalf("want one used-relation rule clue for PhaseEventMiddleware, got %+v", clues)
 	}
 
 	// The unit's OWN symbol appearing in its own diff must not self-inject —

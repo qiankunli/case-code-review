@@ -596,15 +596,17 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 	// final Unit (for a chain Unit, walkForSpecs seeds visited with all member
 	// symbols, so a member never surfaces as another member's caller/callee clue).
 	for i := range units {
-		units[i].Clues = a.findClues(units[i], costly)
+		units[i].Dossier = a.findClues(units[i], costly)
 	}
 	return units, nil
 }
 
-// findClues runs the cheap ClueFinders over a diff unit always, and the costly
-// ones (call-graph grep) only when includeCostly is set.
-func (a *Agent) findClues(u unit.Unit, includeCostly bool) []unit.Clue {
-	var clues []unit.Clue
+// findClues assembles a Unit's Dossier: the cheap ClueFinders run always, the
+// costly ones (call-graph grep) only when includeCostly, then dedup makes the
+// result idempotent (the Dossier's one invariant — see docs/context-model.md; each
+// finder already carries its own relation label in the clue's Text).
+func (a *Agent) findClues(u unit.Unit, includeCostly bool) unit.Dossier {
+	var clues unit.Dossier
 	for _, f := range a.finders {
 		clues = append(clues, f.Find(u)...)
 	}
@@ -613,33 +615,40 @@ func (a *Agent) findClues(u unit.Unit, includeCostly bool) []unit.Clue {
 			clues = append(clues, f.Find(u)...)
 		}
 	}
-	return clues
+	return dedupClues(clues)
 }
 
-// renderClues groups a review unit's clues into the prompt's context blocks: the
-// spec/case contract ({{spec_cases}}), the @rule criteria, the see-also links
-// ({{see_also}}), and a previous review's findings ({{prior_findings}}). The
-// rule.json text is merged with rules by the caller.
-func renderClues(clues []unit.Clue) (specCases, rules, seeAlso, priorFindings string) {
+// dedupClues drops duplicate clues (same relation+kind+text), keeping first seen.
+func dedupClues(clues unit.Dossier) unit.Dossier {
+	seen := make(map[string]bool, len(clues))
+	out := clues[:0]
+	for _, c := range clues {
+		key := string(c.Relation) + "\x00" + string(c.Kind) + "\x00" + c.Text
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, c)
+	}
+	return out
+}
+
+// renderClues groups a Dossier into the prompt's context blocks by clue Kind: the
+// spec/case contract + docstrings ({{spec_cases}}), the @rule criteria, the see-also
+// links ({{see_also}}), and a previous review's findings ({{prior_findings}}). Each
+// clue's Text already carries its relation label (owner/used/caller…). The rule.json
+// text is merged with rules by the caller.
+func renderClues(clues unit.Dossier) (specCases, rules, seeAlso, priorFindings string) {
 	var specBlocks, ruleLines, linkLines, historyBlocks []string
 	for _, c := range clues {
 		switch c.Kind {
-		case unit.ClueSpec, unit.ClueCaller, unit.ClueCallee:
-			// All three are contracts the change must respect: the function's own
-			// spec, the caller's governing spec (inherited when it has none), and
-			// the callees' contracts the change depends on.
+		case unit.ClueSpec, unit.ClueDoc:
+			// Contracts/context the change must respect: own spec, the enclosing
+			// type's spec, the caller's governing spec, callee contracts, and
+			// referenced-type docstrings — differentiated by the label in Text.
 			specBlocks = append(specBlocks, c.Text)
 		case unit.ClueRule:
 			ruleLines = append(ruleLines, "- "+c.Text)
-		case unit.ClueRef:
-			// A rule from a type the diff uses (usage constraint). Label with the
-			// referenced name so the reviewer knows it's about the used type, not
-			// the changed function.
-			ruleLines = append(ruleLines, "- (used type `"+c.Ref+"`) "+c.Text)
-		case unit.ClueDoc:
-			// Docstring of a referenced type (often a dependency). Contract-ish
-			// context, but lower-signal than a curated spec — label it as a docstring.
-			specBlocks = append(specBlocks, "used type `"+c.Ref+"` (docstring): "+c.Text)
 		case unit.ClueLink:
 			linkLines = append(linkLines, "- "+c.Text)
 		case unit.ClueHistory:
@@ -675,7 +684,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	changeFilesExcludingCurrent := a.buildChangeFilesExcept(u.Paths()...)
 
 	// Render this unit's found context (clues) into the prompt blocks.
-	specCases, specRules, seeAlso, priorFindings := renderClues(u.Clues)
+	specCases, specRules, seeAlso, priorFindings := renderClues(u.Dossier)
 	// Per-function @rule (from clues) augments the path-glob rule.json criteria;
 	// both flow into {{system_rule}} (plan + main).
 	rule := a.resolveSystemRule(strings.ToLower(newPath))

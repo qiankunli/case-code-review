@@ -18,7 +18,7 @@ type SpecFinder struct{ Index Index }
 
 func (f SpecFinder) Find(u unit.Unit) []unit.Clue {
 	if r := f.Index.Render(u.AllSymbols()); r != "" {
-		return []unit.Clue{{Kind: unit.ClueSpec, Text: r}}
+		return []unit.Clue{{Kind: unit.ClueSpec, Relation: unit.RelSelf, Text: r}}
 	}
 	return nil
 }
@@ -30,7 +30,7 @@ func (f RuleFinder) Find(u unit.Unit) []unit.Clue {
 	var clues []unit.Clue
 	for _, sym := range u.AllSymbols() {
 		for _, r := range f.Index[sym].Rules {
-			clues = append(clues, unit.Clue{Kind: unit.ClueRule, Text: r})
+			clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelSelf, Text: r})
 		}
 	}
 	return clues
@@ -49,7 +49,7 @@ func (f LinkFinder) Find(u unit.Unit) []unit.Clue {
 			if strings.Contains(l, "::") {
 				kind = "function"
 			}
-			clues = append(clues, unit.Clue{Kind: unit.ClueLink, Text: l + " (" + kind + ")", Ref: l})
+			clues = append(clues, unit.Clue{Kind: unit.ClueLink, Relation: unit.RelSelf, Text: l + " (" + kind + ")", Ref: l})
 		}
 	}
 	return clues
@@ -112,7 +112,12 @@ func (f ReferenceFinder) Find(u unit.Unit) []unit.Clue {
 					continue
 				}
 				seen[key] = true
-				clues = append(clues, unit.Clue{Kind: unit.ClueRef, Text: r, Ref: name})
+				clues = append(clues, unit.Clue{
+					Kind:     unit.ClueRule,
+					Relation: unit.RelUsed,
+					Text:     "(used type `" + name + "`) " + r,
+					Ref:      name,
+				})
 			}
 		}
 	}
