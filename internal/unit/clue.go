@@ -50,5 +50,5 @@ type Dossier = []Clue
 // per (relation, source) it covers. Returning nil is fine. An expensive finder's
 // bounding strategy (e.g. how far to walk callers) lives inside the finder.
 type ClueFinder interface {
-	Find(u Unit) []Clue
+	Find(u Unit) Dossier
 }
