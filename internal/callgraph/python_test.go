@@ -35,6 +35,21 @@ func TestCalleeFinder_Python(t *testing.T) {
 	}
 }
 
+func TestCalleeFinder_PythonDocstring(t *testing.T) {
+	requirePython3(t)
+	// The callee has a docstring but no spec.json entry — adoption-free contract.
+	repo := newRepo(t, map[string]string{
+		"svc.py":      "class Svc:\n    def create(self, req):\n        return validate(req)\n",
+		"validate.py": "def validate(req):\n    \"\"\"Rejects an empty tenant.\"\"\"\n    return None\n",
+	})
+	u := unit.UnitOf(unit.Fragment{Path: "svc.py", Symbols: []string{"svc.py::Svc.create"}})
+	clues := CalleeFinder{RepoDir: repo, Index: spec.Index{}}.Find(u)
+	if len(clues) != 1 || clues[0].Kind != unit.ClueDoc || clues[0].Relation != unit.RelCallee ||
+		clues[0].Ref != "validate.py::validate" || !strings.Contains(clues[0].Text, "Rejects an empty tenant") {
+		t.Fatalf("want callee docstring clue, got %+v", clues)
+	}
+}
+
 func TestCallerFinder_Python(t *testing.T) {
 	requirePython3(t)
 	// helper (changed, no spec) <- handle (calls helper, spec): inherit upward.
