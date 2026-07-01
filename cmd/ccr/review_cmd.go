@@ -227,6 +227,9 @@ func runDryRun(cc *commonContext, opts reviewOptions) error {
 	if err != nil {
 		return fmt.Errorf("dry-run failed: %w", err)
 	}
+	if opts.outputFormat == "json" {
+		return outputDryRunJSON(preview, units)
+	}
 	outputPreviewText(preview) // which files are reviewed/excluded (the --preview view)
 	outputDryRunText(units)    // each unit's assembled context
 	return nil

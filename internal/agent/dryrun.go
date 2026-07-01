@@ -4,17 +4,34 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
 // UnitContext is the review context ccr would inject for one review unit — what
-// `--dry-run` prints instead of running the LLM.
+// `--dry-run` prints (text) or emits (json) instead of running the LLM. The
+// structural fields (Scope/Paths/Fragments/Clues) let `--format json` be used to
+// compare how features (call-chain merge, clues) change unit shape, for free.
 type UnitContext struct {
-	ID        string
-	Path      string
-	SpecCases string // contract: own spec/case + inherited caller spec + depended-on callee contracts
-	Rules     string // path-glob rule.json + function-level @rule
-	SeeAlso   string // curated @link pointers
-	Prior     string // a previous review's findings on this unit (to reconcile)
+	ID        string         `json:"id"`
+	Path      string         `json:"path"`                 // representative member path
+	Scope     string         `json:"scope"`                // func / file / callchain
+	Paths     []string       `json:"paths"`                // member files; len>1 = cross-file (call-chain) unit
+	Fragments int            `json:"fragments"`            // changed regions merged into this unit
+	Clues     map[string]int `json:"clues"`                // clue kind -> count (spec/rule/link/caller/callee/history)
+	SpecCases string         `json:"spec_cases,omitempty"` // contract: own spec/case + inherited caller spec + depended-on callee contracts
+	Rules     string         `json:"rules,omitempty"`      // path-glob rule.json + function-level @rule
+	SeeAlso   string         `json:"see_also,omitempty"`   // curated @link pointers
+	Prior     string         `json:"prior,omitempty"`      // a previous review's findings on this unit (to reconcile)
+}
+
+// countClues tallies a Unit's clues by kind (spec/rule/link/caller/callee/history).
+func countClues(clues []unit.Clue) map[string]int {
+	m := make(map[string]int, len(clues))
+	for _, c := range clues {
+		m[string(c.Kind)]++
+	}
+	return m
 }
 
 // DryRun loads diffs once and returns the complete no-LLM view behind
@@ -46,6 +63,10 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, error)
 		out = append(out, UnitContext{
 			ID:        u.ID,
 			Path:      u.Path(),
+			Scope:     string(u.Scope),
+			Paths:     u.Paths(),
+			Fragments: len(u.Fragments),
+			Clues:     countClues(u.Clues),
 			SpecCases: specCases,
 			Rules:     rule,
 			SeeAlso:   seeAlso,
