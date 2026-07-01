@@ -299,6 +299,48 @@ func outputDryRunText(units []agent.UnitContext) {
 	}
 }
 
+// dryRunMetrics is the structural summary of a dry-run — the numbers you compare
+// across feature toggles (call-chain merge, clues) without spending LLM tokens.
+type dryRunMetrics struct {
+	UnitCount      int            `json:"unit_count"`
+	ScopeCounts    map[string]int `json:"scope_counts"`     // func / file / callchain -> #units
+	CrossFileUnits int            `json:"cross_file_units"` // units spanning >1 file (call-chain effect)
+	FragmentsTotal int            `json:"fragments_total"`  // total changed regions across units
+	ClueCoverage   map[string]int `json:"clue_coverage"`    // clue kind -> #units carrying >=1 of it
+}
+
+type dryRunJSON struct {
+	Preview *agent.DiffPreview  `json:"preview"`
+	Metrics dryRunMetrics       `json:"metrics"`
+	Units   []agent.UnitContext `json:"units"`
+}
+
+// outputDryRunJSON emits the dry-run as JSON: the file preview, a structural
+// metrics summary, and each unit's assembled context. Deterministic (no LLM), so
+// it's the free layer for A/B-comparing what a feature changes.
+func outputDryRunJSON(preview *agent.DiffPreview, units []agent.UnitContext) error {
+	m := dryRunMetrics{
+		UnitCount:    len(units),
+		ScopeCounts:  map[string]int{},
+		ClueCoverage: map[string]int{},
+	}
+	for _, u := range units {
+		m.ScopeCounts[u.Scope]++
+		if len(u.Paths) > 1 {
+			m.CrossFileUnits++
+		}
+		m.FragmentsTotal += u.Fragments
+		for kind, n := range u.Clues {
+			if n > 0 {
+				m.ClueCoverage[kind]++
+			}
+		}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(dryRunJSON{Preview: preview, Metrics: m, Units: units})
+}
+
 func dryRunSection(title, body string) {
 	if strings.TrimSpace(body) == "" {
 		body = "(none)"
