@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/agent"
@@ -12,6 +13,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/config/template"
 	"github.com/qiankunli/case-code-review/internal/config/toolsconfig"
 	"github.com/qiankunli/case-code-review/internal/diff"
+	"github.com/qiankunli/case-code-review/internal/feature"
 	"github.com/qiankunli/case-code-review/internal/gitcmd"
 	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/model"
@@ -116,12 +118,38 @@ type llmRuntime struct {
 	AppCfg       *Config
 }
 
+// resolveFeatures layers feature-gate config in precedence order: registry
+// defaults < config file (features:{}) < CCR_FEATURES env < --feature CLI.
+// Unknown gate names are a hard error (typo protection). Best-effort on the
+// config file (missing/unreadable → defaults).
+func resolveFeatures(cliFeatures []string) (feature.Set, error) {
+	var configLayer map[feature.Gate]bool
+	if cfgPath, err := defaultConfigPath(); err == nil {
+		if appCfg, err := LoadAppConfig(cfgPath); err == nil && appCfg != nil && len(appCfg.Features) > 0 {
+			configLayer = make(map[feature.Gate]bool, len(appCfg.Features))
+			for k, v := range appCfg.Features {
+				configLayer[feature.Gate(k)] = v
+			}
+		}
+	}
+	envLayer, err := feature.Parse(os.Getenv("CCR_FEATURES"))
+	if err != nil {
+		return nil, err
+	}
+	cliLayer, err := feature.Parse(strings.Join(cliFeatures, ","))
+	if err != nil {
+		return nil, err
+	}
+	return feature.Resolve(configLayer, envLayer, cliLayer)
+}
+
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
 // from the user's default config path (applying the configured language to
 // tpl — defaulting when the config file is absent), resolves the LLM
-// endpoint (honoring modelOverride from --model when non-empty), and
+// endpoint (honoring modelOverride from --model when non-empty; routingEnabled
+// off collapses a multi-model pool to a single deterministic model), and
 // returns the runtime bundle. tpl is mutated in place.
-func loadLLMRuntime(tpl *template.Template, toolConfigPath, modelOverride string) (*llmRuntime, error) {
+func loadLLMRuntime(tpl *template.Template, toolConfigPath, modelOverride string, routingEnabled bool) (*llmRuntime, error) {
 	toolEntries, err := toolsconfig.Load(toolConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("load tools: %w", err)
@@ -148,6 +176,11 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath, modelOverride string
 	eps, policy, err := llm.ResolveModelsWithModelOverride(cfgPath, modelOverride)
 	if err != nil {
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
+	}
+	if !routingEnabled && len(eps) > 1 {
+		// routing gate off: collapse to a single model (deterministic — no
+		// round-robin variance). NewLLMRouter with a 1-pool returns a plain client.
+		eps, policy = eps[:1], ""
 	}
 
 	return &llmRuntime{

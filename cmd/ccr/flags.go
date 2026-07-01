@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/qiankunli/case-code-review/internal/feature"
 )
 
 // --- custom flag set that supports short flags (-c, -f etc.) ---
@@ -56,6 +58,21 @@ func (a *ocrFlagSet) IntVar(p *int, name string, value int, usage string) {
 
 func (a *ocrFlagSet) DurationVar(p *time.Duration, name string, value time.Duration, usage string) {
 	a.fs.DurationVar(p, name, value, usage)
+}
+
+// repeatableString is a flag.Value that accumulates every occurrence of a flag,
+// so `--feature a=off --feature b=off` yields ["a=off", "b=off"].
+type repeatableString []string
+
+func (r *repeatableString) String() string { return fmt.Sprintf("%v", []string(*r)) }
+func (r *repeatableString) Set(v string) error {
+	*r = append(*r, v)
+	return nil
+}
+
+// StringSliceVar registers a repeatable --name flag.
+func (a *ocrFlagSet) StringSliceVar(p *[]string, name, usage string) {
+	a.fs.Var((*repeatableString)(p), name, usage)
 }
 
 func (a *ocrFlagSet) PrintDefaults() {
@@ -114,6 +131,7 @@ type reviewOptions struct {
 	maxGitProcs    int
 	preview        bool
 	dryRun         bool
+	features       []string // --feature name=on|off (repeatable): ablation gates; see internal/feature
 	showHelp       bool
 }
 
@@ -130,6 +148,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVarP(&opts.commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
 	a.StringVar(&opts.excludes, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 	a.StringVarP(&opts.outputFormat, "format", "f", "text", "output format: text or json")
+	a.StringSliceVar(&opts.features, "feature", "toggle a feature gate: name=on|off (repeatable); run 'ccr review --help' for the list")
 	a.IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file reviews")
 	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
 	a.StringVar(&opts.audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
@@ -232,6 +251,7 @@ Flags:
   -b, --background string optional requirement/business context for the review
   -c, --commit string     single commit hash or tag to review (vs its parent)
   -f, --format string     output format: text or json (default "text")
+  --feature name=on|off   toggle a feature gate (repeatable); also config features:{} / CCR_FEATURES env
   --concurrency int       max concurrent file reviews (default 8)
   --max-git-procs int     max concurrent git subprocesses (default 16)
   --from string           source ref to start diff from (e.g., 'main')
@@ -246,6 +266,11 @@ Flags:
   --timeout int           concurrent task timeout in minutes (default 10)
   --to string             target ref to end diff at (e.g., 'feature-branch')
   --tools string          path to JSON tools config file (default: embedded)`)
+
+	fmt.Println("\nFeature gates (--feature name=on|off; leave-one-out ablation, all default on):")
+	for _, line := range feature.Describe() {
+		fmt.Println("  " + line)
+	}
 }
 
 // --- config subcommand ---
