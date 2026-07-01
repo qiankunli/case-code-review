@@ -108,3 +108,28 @@ func TestReferenceFinder_FqnDisambiguates(t *testing.T) {
 		t.Fatalf("want only the import-resolved (framework) rule, got %+v", clues)
 	}
 }
+
+// Go: a `pkg.Symbol` selector resolves via the file's import to the right fqn — the
+// framework rule fires, the same-named local Middleware is suppressed.
+func TestReferenceFinder_GoSelectorFqn(t *testing.T) {
+	idx, err := Parse([]byte(`{
+	  "framework/mw/trace.go::Middleware": { "fqn": "github.com/org/framework/mw/trace.Middleware", "cases": [], "rules": ["per-request only"] },
+	  "app/local.go::Middleware": { "fqn": "github.com/org/app/local.Middleware", "cases": [], "rules": ["local rule — should NOT fire"] }
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := t.TempDir()
+	write(t, filepath.Join(repo, "app", "handler.go"),
+		"package app\n\nimport \"github.com/org/framework/mw/trace\"\n\nfunc create() {\n\t_ = trace.Middleware{}\n}\n")
+
+	u := unit.UnitOf(unit.Fragment{
+		Path:    "app/handler.go",
+		Symbols: []string{"app/handler.go::create"},
+		Diff:    "+\t_ = trace.Middleware{}\n",
+	})
+	clues := NewReferenceFinder(idx, repo).Find(u)
+	if len(clues) != 1 || !strings.Contains(clues[0].Text, "per-request only") {
+		t.Fatalf("want only the import-resolved (framework) rule, got %+v", clues)
+	}
+}
