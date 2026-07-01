@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -60,5 +61,21 @@ func TestOwnerFinder(t *testing.T) {
 	self := unit.UnitOf(unit.Fragment{Path: "trace.py", Symbols: []string{"trace.py::PhaseEventMiddleware"}})
 	if got := (OwnerFinder{Index: idx}).Find(self); got != nil {
 		t.Errorf("top-level symbol has no owner, got %+v", got)
+	}
+}
+
+func TestOwnerFinder_Docstring(t *testing.T) {
+	repo := t.TempDir()
+	write(t, filepath.Join(repo, "trace.py"),
+		"class PhaseEventMiddleware:\n    \"\"\"Per-request only — do not reuse across requests.\"\"\"\n\n    def dispatch(self):\n        ...\n")
+
+	// no spec.json markers at all — docstring is the only (adoption-free) context.
+	u := unit.UnitOf(unit.Fragment{Path: "trace.py", Symbols: []string{"trace.py::PhaseEventMiddleware.dispatch"}})
+	clues := OwnerFinder{Index: Index{}, RepoDir: repo}.Find(u)
+
+	if len(clues) != 1 || clues[0].Kind != unit.ClueDoc || clues[0].Relation != unit.RelOwner ||
+		clues[0].Ref != "trace.py::PhaseEventMiddleware" ||
+		!strings.Contains(clues[0].Text, "Per-request only") {
+		t.Fatalf("want one owner-relation doc clue from the enclosing class docstring, got %+v", clues)
 	}
 }
