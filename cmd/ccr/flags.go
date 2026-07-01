@@ -222,6 +222,7 @@ Examples:
 
   # Full no-LLM view: the --preview file list + each unit's assembled context
   ccr review --dry-run
+  ccr review --dry-run --format json   # + structural metrics (unit/scope/clue counts) for free A/B
 
   # Inject contract context from a spec.json (specgen output; also auto-loaded from .casecodereview/spec.json)
   ccr review --spec spec.json
