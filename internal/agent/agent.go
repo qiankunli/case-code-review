@@ -208,7 +208,7 @@ func New(args Args) *Agent {
 	// OwnerFinder surfaces the enclosing type's markers when a *method* changes —
 	// so a class-level @rule fires on method edits (else it never would). Cheap
 	// (symbol-id derivation + Index lookup). Always on. See docs/context-model.md.
-	finders = append(finders, spec.OwnerFinder{Index: args.SpecIndex})
+	finders = append(finders, spec.OwnerFinder{Index: args.SpecIndex, RepoDir: args.RepoDir})
 	var costlyFinders []unit.ClueFinder
 	if f.Enabled(feature.CallerCallee) {
 		costlyFinders = append(costlyFinders,
@@ -655,6 +655,10 @@ func renderClues(clues unit.Dossier) (specCases, rules, seeAlso, priorFindings s
 			// Prior-review findings: not a contract — the reviewer reconciles them
 			// (already framed as an adjudication task by the history finder).
 			historyBlocks = append(historyBlocks, c.Text)
+		default:
+			// A new ClueKind added without a case here surfaces as context rather
+			// than being silently dropped.
+			specBlocks = append(specBlocks, c.Text)
 		}
 	}
 	return strings.Join(specBlocks, "\n"), strings.Join(ruleLines, "\n"), strings.Join(linkLines, "\n"), strings.Join(historyBlocks, "\n")
