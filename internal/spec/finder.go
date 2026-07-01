@@ -1,9 +1,11 @@
 package spec
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/qiankunli/case-code-review/internal/unit"
@@ -79,13 +81,20 @@ type ReferenceFinder struct {
 	repoDir string              // for reading referencing files' imports (Python)
 }
 
-// NewReferenceFinder precomputes the name/fqn -> symbol-id indexes once (not per Unit).
+// NewReferenceFinder precomputes the name/fqn -> symbol-id indexes once (not per
+// Unit). Symbol-ids are processed in sorted order so the winner is deterministic
+// when two entries share an fqn (possible across merged spec.json layers).
 func NewReferenceFinder(idx Index, repoDir string) ReferenceFinder {
 	byName := make(map[string][]string)
 	byFqn := make(map[string]string)
-	for id, e := range idx {
-		if e.Fqn != "" {
-			byFqn[e.Fqn] = id
+	ids := make([]string, 0, len(idx))
+	for id := range idx {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if fqn := idx[id].Fqn; fqn != "" {
+			byFqn[fqn] = id
 		}
 		sym := id
 		if _, after, ok := strings.Cut(id, "::"); ok {
@@ -107,8 +116,6 @@ func (f ReferenceFinder) Find(u unit.Unit) []unit.Clue {
 	for _, s := range u.AllSymbols() {
 		own[s] = true
 	}
-	imports := f.importFqns(u) // referenced name -> fqn (from the unit's Python imports)
-
 	var clues []unit.Clue
 	seen := make(map[string]bool) // dedup (symbol-id, rule) across repeated references
 	emit := func(name, id string) {
@@ -129,8 +136,32 @@ func (f ReferenceFinder) Find(u unit.Unit) []unit.Clue {
 			})
 		}
 	}
-	for _, name := range identifier.FindAllString(u.Diff(), -1) {
-		if fqn, ok := imports[name]; ok { // precise: import-resolved fqn
+	diff := u.Diff()
+	resolved := map[string]bool{} // bare names resolved precisely via fqn — skip their bare-name fallback
+
+	// Go: `pkg.Symbol` selectors → importPath.Symbol fqn (precise, disambiguates
+	// same-named types across packages).
+	if goImp := f.goImportPaths(u); len(goImp) > 0 {
+		for _, m := range goSelector.FindAllStringSubmatch(diff, -1) {
+			pkg, sym := m[1], m[2]
+			path, ok := goImp[pkg]
+			if !ok {
+				continue
+			}
+			if id, ok := f.byFqn[path+"."+sym]; ok {
+				emit(sym, id)
+				resolved[sym] = true // don't also bare-name match this symbol
+			}
+		}
+	}
+
+	// Python: `from mod import Name` resolves a bare name to fqn; else bare-name.
+	pyImports := f.pyImportFqns(u)
+	for _, name := range identifier.FindAllString(diff, -1) {
+		if resolved[name] {
+			continue
+		}
+		if fqn, ok := pyImports[name]; ok { // precise: import-resolved fqn
 			if id, ok := f.byFqn[fqn]; ok {
 				emit(name, id)
 				continue // resolved precisely — skip bare-name (avoids same-name mismatch)
@@ -143,10 +174,9 @@ func (f ReferenceFinder) Find(u unit.Unit) []unit.Clue {
 	return clues
 }
 
-// importFqns resolves the unit's Python member-file imports to fqns (local name ->
-// module.realname), so a referenced name can be matched precisely against fqn-keyed
-// entries. Empty when there's no repoDir or no Python members.
-func (f ReferenceFinder) importFqns(u unit.Unit) map[string]string {
+// pyImportFqns resolves the unit's Python member-file imports to fqns (local name ->
+// module.realname). Empty when there's no repoDir or no Python members.
+func (f ReferenceFinder) pyImportFqns(u unit.Unit) map[string]string {
 	if f.repoDir == "" {
 		return nil
 	}
@@ -157,10 +187,28 @@ func (f ReferenceFinder) importFqns(u unit.Unit) map[string]string {
 		}
 		src, err := os.ReadFile(filepath.Join(f.repoDir, p))
 		if err != nil {
-			continue
+			continue // best-effort: an unreadable member just skips its imports
 		}
 		for local, sym := range parsePyFromImports(string(src)) {
 			out[local] = sym.module + "." + sym.name
+		}
+	}
+	return out
+}
+
+// goImportPaths maps the unit's Go member-file import selector names to import
+// paths (see parseGoImports), so a `pkg.Symbol` reference resolves to a fqn.
+func (f ReferenceFinder) goImportPaths(u unit.Unit) map[string]string {
+	if f.repoDir == "" {
+		return nil
+	}
+	out := map[string]string{}
+	for _, p := range u.Paths() {
+		if !strings.HasSuffix(p, ".go") {
+			continue
+		}
+		if src, err := os.ReadFile(filepath.Join(f.repoDir, p)); err == nil {
+			maps.Copy(out, parseGoImports(string(src)))
 		}
 	}
 	return out
