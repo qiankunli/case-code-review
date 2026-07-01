@@ -74,7 +74,7 @@ func TestDogfoodContextAssembly(t *testing.T) {
 	type ctx struct{ sc, ru, sa string }
 	got := map[string]ctx{}
 	for _, u := range units {
-		sc, ru, sa, _ := renderClues(u.Clues)
+		sc, ru, sa, _ := renderClues(u.Dossier)
 		got[u.ID] = ctx{sc, ru, sa}
 		t.Logf("\n========== review unit: %s ==========\n"+
 			"── Governing Spec/Case ──\n%s\n── Review Rules ──\n%s\n── See Also ──\n%s",

@@ -18,18 +18,20 @@ type UnitContext struct {
 	Scope     string         `json:"scope"`                // func / file / callchain
 	Paths     []string       `json:"paths"`                // member files; len>1 = cross-file (call-chain) unit
 	Fragments int            `json:"fragments"`            // changed regions merged into this unit
-	Clues     map[string]int `json:"clues"`                // clue kind -> count (spec/rule/link/caller/callee/history)
+	Clues     map[string]int `json:"clues"`                // "<relation>/<kind>" -> count (e.g. owner/rule, used/doc, caller/spec)
 	SpecCases string         `json:"spec_cases,omitempty"` // contract: own spec/case + inherited caller spec + depended-on callee contracts
 	Rules     string         `json:"rules,omitempty"`      // path-glob rule.json + function-level @rule
 	SeeAlso   string         `json:"see_also,omitempty"`   // curated @link pointers
 	Prior     string         `json:"prior,omitempty"`      // a previous review's findings on this unit (to reconcile)
 }
 
-// countClues tallies a Unit's clues by kind (spec/rule/link/caller/callee/history).
-func countClues(clues []unit.Clue) map[string]int {
+// countClues tallies a Unit's Dossier on the relation×kind matrix, keyed
+// "<relation>/<kind>" (e.g. self/spec, owner/rule, used/doc, caller/spec) — so
+// --dry-run shows which relation contributed which evidence, for free.
+func countClues(clues unit.Dossier) map[string]int {
 	m := make(map[string]int, len(clues))
 	for _, c := range clues {
-		m[string(c.Kind)]++
+		m[string(c.Relation)+"/"+string(c.Kind)]++
 	}
 	return m
 }
@@ -52,7 +54,7 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, error)
 	out := make([]UnitContext, 0, len(units))
 	for _, u := range units {
 		// Mirror reviewUnit's context assembly: clues + the path-glob rule.json.
-		specCases, specRules, seeAlso, prior := renderClues(u.Clues)
+		specCases, specRules, seeAlso, prior := renderClues(u.Dossier)
 		rule := a.resolveSystemRule(strings.ToLower(u.Path()))
 		if specRules != "" {
 			if rule != "" {
@@ -66,7 +68,7 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, error)
 			Scope:     string(u.Scope),
 			Paths:     u.Paths(),
 			Fragments: len(u.Fragments),
-			Clues:     countClues(u.Clues),
+			Clues:     countClues(u.Dossier),
 			SpecCases: specCases,
 			Rules:     rule,
 			SeeAlso:   seeAlso,

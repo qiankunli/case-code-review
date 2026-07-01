@@ -34,17 +34,17 @@ func (f OwnerFinder) Find(u unit.Unit) []unit.Clue {
 		e := f.Index[owner]
 		name := ownerName(owner)
 		if r := f.Index.Render([]string{owner}); r != "" {
-			clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Text: r})
+			clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelOwner, Text: r})
 		}
 		for _, ru := range e.Rules {
-			clues = append(clues, unit.Clue{Kind: unit.ClueRule, Text: "(enclosing type `" + name + "`) " + ru})
+			clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelOwner, Text: "(enclosing type `" + name + "`) " + ru})
 		}
 		for _, l := range e.Links {
 			kind := "doc"
 			if strings.Contains(l, "::") {
 				kind = "function"
 			}
-			clues = append(clues, unit.Clue{Kind: unit.ClueLink, Text: l + " (" + kind + ")", Ref: l})
+			clues = append(clues, unit.Clue{Kind: unit.ClueLink, Relation: unit.RelOwner, Text: l + " (" + kind + ")", Ref: l})
 		}
 	}
 	return clues

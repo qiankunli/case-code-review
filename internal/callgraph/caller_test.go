@@ -40,7 +40,7 @@ func TestCallerFinder_InheritsSpecFromCaller(t *testing.T) {
 	if len(clues) != 1 {
 		t.Fatalf("want 1 inherited caller clue, got %d: %+v", len(clues), clues)
 	}
-	if clues[0].Kind != unit.ClueCaller || clues[0].Ref != "handler.go::Handle" ||
+	if clues[0].Kind != unit.ClueSpec || clues[0].Relation != unit.RelCaller || clues[0].Ref != "handler.go::Handle" ||
 		!strings.Contains(clues[0].Text, "must validate tenant") {
 		t.Errorf("clue off: %+v", clues[0])
 	}
