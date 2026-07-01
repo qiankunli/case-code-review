@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -41,7 +42,7 @@ func TestFinders(t *testing.T) {
 func TestFindersNilAndUnknownSafe(t *testing.T) {
 	var nilIdx Index
 	u := unit.UnitOf(unit.Fragment{Path: "x", Symbols: []string{"x::Unknown"}})
-	for _, f := range []unit.ClueFinder{SpecFinder{nilIdx}, RuleFinder{nilIdx}, LinkFinder{nilIdx}, NewReferenceFinder(nilIdx)} {
+	for _, f := range []unit.ClueFinder{SpecFinder{nilIdx}, RuleFinder{nilIdx}, LinkFinder{nilIdx}, NewReferenceFinder(nilIdx, "")} {
 		if got := f.Find(u); got != nil {
 			t.Errorf("nil index should find nothing, got %+v", got)
 		}
@@ -56,7 +57,7 @@ func TestReferenceFinder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rf := NewReferenceFinder(idx)
+	rf := NewReferenceFinder(idx, "")
 
 	// A unit that USES PhaseEventMiddleware picks up its class rule, even though
 	// the middleware's own definition isn't in this diff.
@@ -80,5 +81,30 @@ func TestReferenceFinder(t *testing.T) {
 	})
 	if got := rf.Find(own); got != nil {
 		t.Errorf("own symbol should not self-inject, got %+v", got)
+	}
+}
+
+// When two symbols share a bare name, an import resolves the reference to the right
+// one via fqn — the dependency's rule fires, the same-named local one doesn't.
+func TestReferenceFinder_FqnDisambiguates(t *testing.T) {
+	idx, err := Parse([]byte(`{
+	  "framework/mw/trace.py::Middleware": { "fqn": "framework.mw.trace.Middleware", "cases": [], "rules": ["per-request only"] },
+	  "app/local.py::Middleware": { "fqn": "app.local.Middleware", "cases": [], "rules": ["local rule — should NOT fire"] }
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := t.TempDir()
+	write(t, filepath.Join(repo, "app", "handler.py"),
+		"from framework.mw.trace import Middleware\n\ndef create():\n    return Middleware()\n")
+
+	u := unit.UnitOf(unit.Fragment{
+		Path:    "app/handler.py",
+		Symbols: []string{"app/handler.py::create"},
+		Diff:    "+    return Middleware()\n",
+	})
+	clues := NewReferenceFinder(idx, repo).Find(u)
+	if len(clues) != 1 || !strings.Contains(clues[0].Text, "per-request only") {
+		t.Fatalf("want only the import-resolved (framework) rule, got %+v", clues)
 	}
 }
