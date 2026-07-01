@@ -156,7 +156,7 @@ func runScan(args []string) error {
 		return runScanPreview(cc, scanTpl, scanPaths)
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model, true) // scan: routing gate not wired; keep pool
 	if err != nil {
 		return err
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/config/template"
 	"github.com/qiankunli/case-code-review/internal/config/toolsconfig"
 	"github.com/qiankunli/case-code-review/internal/diff"
+	"github.com/qiankunli/case-code-review/internal/feature"
 	"github.com/qiankunli/case-code-review/internal/gitcmd"
 	"github.com/qiankunli/case-code-review/internal/history"
 	"github.com/qiankunli/case-code-review/internal/llm"
@@ -125,6 +126,11 @@ type Args struct {
 	// Session is an optional session history instance for collecting conversation records.
 	// When nil, a default one is created automatically with git branch auto-detected from repoDir.
 	Session *session.SessionHistory
+
+	// Features are the resolved feature gates for this run (ablation toggles). Nil
+	// means all defaults (full feature set) — so callers that don't set it are
+	// unaffected. Gates flow into unit splitting, clue finders, and review phases.
+	Features feature.Set
 }
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
@@ -149,6 +155,10 @@ type Agent struct {
 	// is focused enough that units won't coalesce — see splitUnits.
 	finders       []unit.ClueFinder
 	costlyFinders []unit.ClueFinder
+	// features are the resolved ablation gates; consulted in splitUnits (callchain)
+	// and dispatchUnits (plan / review_filter). Clue gates are applied at finder
+	// assembly in New(), so findClues stays gate-agnostic.
+	features feature.Set
 }
 
 // New creates a new Agent from the given arguments.
@@ -172,27 +182,40 @@ func New(args Args) *Agent {
 			DiffCommit: args.Commit,
 		})
 	}
+	// Clue gates are applied here (finder assembly) rather than in findClues, so a
+	// disabled clue kind simply never runs its finder.
+	f := args.Features
+	var finders []unit.ClueFinder
+	if f.Enabled(feature.SpecCase) {
+		finders = append(finders, spec.SpecFinder{Index: args.SpecIndex})
+	}
+	if f.Enabled(feature.Rule) {
+		finders = append(finders, spec.RuleFinder{Index: args.SpecIndex})
+	}
+	if f.Enabled(feature.Link) {
+		finders = append(finders, spec.LinkFinder{Index: args.SpecIndex})
+	}
+	if f.Enabled(feature.History) {
+		finders = append(finders, history.Finder{Index: args.HistoryIndex})
+	}
+	var costlyFinders []unit.ClueFinder
+	if f.Enabled(feature.CallerCallee) {
+		costlyFinders = append(costlyFinders,
+			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.SpecIndex, Runner: args.GitRunner},
+			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.SpecIndex, Runner: args.GitRunner},
+		)
+	}
 	a := &Agent{
-		args:    args,
-		session: args.Session,
+		args:     args,
+		session:  args.Session,
+		features: f,
 		// AutoSplitter cuts each file to function-level diff units by language (Go
 		// via go/ast, Python via python3), degrading to file scope otherwise;
 		// WatermarkMerger coalesces them into review units above the watermark.
-		splitter: unit.AutoSplitter{},
-		merger:   unit.WatermarkMerger{Watermark: defaultUnitWatermark},
-		// Cheap, always-on: spec.json lookups by symbol + prior-review findings.
-		finders: []unit.ClueFinder{
-			spec.SpecFinder{Index: args.SpecIndex},
-			spec.RuleFinder{Index: args.SpecIndex},
-			spec.LinkFinder{Index: args.SpecIndex},
-			history.Finder{Index: args.HistoryIndex},
-		},
-		// Costly, budget-gated: CallerFinder greps the repo to inherit a caller's
-		// governing spec. (callee finder joins here later.)
-		costlyFinders: []unit.ClueFinder{
-			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.SpecIndex, Runner: args.GitRunner},
-			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.SpecIndex, Runner: args.GitRunner},
-		},
+		splitter:      unit.AutoSplitter{},
+		merger:        unit.WatermarkMerger{Watermark: defaultUnitWatermark},
+		finders:       finders,       // cheap spec.json / history clues, gated per kind
+		costlyFinders: costlyFinders, // call-graph caller/callee clues (gated + budget-gated)
 	}
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
@@ -206,6 +229,7 @@ func New(args Args) *Agent {
 		CommentCollector:  args.CommentCollector,
 		CommentWorkerPool: args.CommentWorkerPool,
 		Session:           args.Session,
+		RelocationEnabled: f.Enabled(feature.Relocation),
 		DiffLookup:        a.findDiff,
 	})
 	return a
@@ -452,7 +476,9 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 	// per-Unit filter would judge sibling Units' comments against only this
 	// Unit's diff slice. File-level filtering sees the whole file diff + all its
 	// comments at once.
-	a.runReviewFilters(ctx)
+	if a.features.Enabled(feature.ReviewFilter) {
+		a.runReviewFilters(ctx)
+	}
 
 	comments := a.args.CommentCollector.Comments()
 	a.tagSymbolIDs(comments)
@@ -544,12 +570,13 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 	// we skip straight to cost coarsening (the same gate as the costly finders).
 	costly := total <= defaultUnitWatermark
 	var units []unit.Unit
-	if costly {
+	if costly && a.features.Enabled(feature.CallChain) {
 		adj := callgraph.CallAdjacency(a.args.RepoDir, a.args.GitRunner, funcIDsOf(files))
 		chains, residual := clusterByCallChain(files, adj)
 		units = append(units, chains...)
 		units = append(units, merger.Merge(residual)...)
 	} else {
+		// callchain off (or budget exceeded): only the cost axis — func/file units.
 		units = merger.Merge(files)
 	}
 
@@ -642,15 +669,16 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	threshold := a.args.Template.PlanModeLineThreshold
 	changeLines := u.Insertions() + u.Deletions()
 
-	// Phase 1: Plan (skip when changes are below threshold)
+	// Phase 1: Plan (gated off, or skipped when changes are below threshold)
 	var planResult string
-	if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 && threshold > 0 && changeLines < int64(threshold) {
+	planOn := a.features.Enabled(feature.Plan)
+	if planOn && a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 && threshold > 0 && changeLines < int64(threshold) {
 		fmt.Fprintf(stdout.Writer(), "[ccr] Skipping plan phase for %s (%d lines < threshold %d)\n", newPath, changeLines, threshold)
 		telemetry.Event(ctx, "plan.skipped",
 			telemetry.AnyToAttr("file.path", newPath),
 			telemetry.AnyToAttr("lines.changed", changeLines),
 			telemetry.AnyToAttr("threshold", threshold))
-	} else if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 {
+	} else if planOn && a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 {
 		var err error
 		planResult, err = a.executePlanPhase(ctx, sc, u.Diff(), changeFilesExcludingCurrent, rule)
 		if err != nil {
