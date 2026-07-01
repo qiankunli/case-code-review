@@ -18,6 +18,11 @@ const (
 	// symbol itself) — e.g. a type used in the change whose class-level @rule is a
 	// usage constraint ("per-request only"). Reference axis, not the own-symbol axis.
 	ClueRef ClueKind = "ref"
+	// ClueDoc carries the docstring of a symbol the diff references, read on demand
+	// from its (possibly dependency) source. Adoption-free contract context: works
+	// for any documented dependency without spec-case markers. Lower-signal than a
+	// curated spec/rule, so it's labelled as a docstring for the reviewer to weigh.
+	ClueDoc ClueKind = "doc"
 )
 
 // Clue is one piece of context found for a review Unit — a contract, a review
