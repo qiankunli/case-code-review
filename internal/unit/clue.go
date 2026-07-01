@@ -14,6 +14,10 @@ const (
 	// can judge whether the current change addresses them (the review-history
 	// feedback loop — a per-unit input alongside spec/rule).
 	ClueHistory ClueKind = "history"
+	// ClueRef carries a rule from a symbol the diff *references* (not the changed
+	// symbol itself) — e.g. a type used in the change whose class-level @rule is a
+	// usage constraint ("per-request only"). Reference axis, not the own-symbol axis.
+	ClueRef ClueKind = "ref"
 )
 
 // Clue is one piece of context found for a review Unit — a contract, a review
