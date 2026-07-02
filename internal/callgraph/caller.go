@@ -50,13 +50,13 @@ func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
 	}
 	var doc *docRider
 	if f.Doc {
-		doc = &docRider{repoDir: f.RepoDir, relation: unit.RelCaller, label: "caller"}
+		doc = &docRider{repoDir: f.RepoDir, relation: unit.RelCaller}
 	}
 	return walkForSpecs(f.Index, u.AllSymbols(), f.callers, f.Depth, max, doc, func(id string) unit.Clue {
 		return unit.Clue{
 			Kind:     unit.ClueSpec,
 			Relation: unit.RelCaller,
-			Text:     "(governing spec inherited from caller " + id + ")\n" + f.Index.Render([]string{id}),
+			Text:     f.Index.Render([]string{id}),
 			Ref:      id,
 		}
 	})

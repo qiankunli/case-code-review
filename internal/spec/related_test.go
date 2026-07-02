@@ -138,23 +138,24 @@ func TestRelatedFinder_OwnerMarks(t *testing.T) {
 	u := unit.UnitOf(unit.Fragment{Path: "trace.py", Symbols: []string{"trace.py::PhaseEventMiddleware.dispatch"}})
 	clues := NewRelatedFinder(Catalog{Local: idx}, "", allGates).Find(u)
 
-	var ruleText, specText string
+	var rule, spec *unit.Clue
 	for _, c := range clues {
 		if c.Relation != unit.RelOwner {
 			continue
 		}
 		switch c.Kind {
 		case unit.ClueRule:
-			ruleText = c.Text
+			rule = &c
 		case unit.ClueSpec:
-			specText = c.Text
+			spec = &c
 		}
 	}
-	if !strings.Contains(specText, "per-request lifecycle") {
+	if spec == nil || !strings.Contains(spec.Text, "per-request lifecycle") {
 		t.Errorf("want enclosing spec, got clues %+v", clues)
 	}
-	if !strings.Contains(ruleText, "per-request only") || !strings.Contains(ruleText, "PhaseEventMiddleware") {
-		t.Errorf("want labelled enclosing rule, got %q", ruleText)
+	// Text is raw; the identity travels in Ref (render labels from it).
+	if rule == nil || rule.Text != "per-request only — do not cache" || rule.Ref != "trace.py::PhaseEventMiddleware" {
+		t.Errorf("want raw enclosing rule with owner symbol-id in Ref, got %+v", rule)
 	}
 
 	// when the class itself is the changed symbol there is no owner (top-level).

@@ -315,8 +315,9 @@ func (f RelatedFinder) Find(u unit.Unit) []unit.Clue {
 }
 
 // cluesFor is the source axis: a related symbol's authored marks (its resolved
-// entry, or a local-index lookup) and derived docstring (source file), labelled
-// by the relation that reached it.
+// entry, or a local-index lookup) and derived docstring (source file). Text is
+// RAW content and Ref the source identity — how a clue reached the unit is
+// worded at render time from (relation, kind, ref), not here.
 func (f RelatedFinder) cluesFor(rs RelatedSymbol) []unit.Clue {
 	var clues []unit.Clue
 	e := rs.Entry
@@ -328,12 +329,12 @@ func (f RelatedFinder) cluesFor(rs RelatedSymbol) []unit.Clue {
 	case unit.RelSelf:
 		if f.gates.Spec {
 			if r := f.local.Render([]string{rs.ID}); r != "" {
-				clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelSelf, Text: r})
+				clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelSelf, Text: r, Ref: rs.ID})
 			}
 		}
 		if f.gates.Rule {
 			for _, r := range e.Rules {
-				clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelSelf, Text: r})
+				clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelSelf, Text: r, Ref: rs.ID})
 			}
 		}
 		if f.gates.Link {
@@ -342,12 +343,12 @@ func (f RelatedFinder) cluesFor(rs RelatedSymbol) []unit.Clue {
 	case unit.RelOwner:
 		if f.gates.Spec {
 			if r := f.local.Render([]string{rs.ID}); r != "" {
-				clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelOwner, Text: r})
+				clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelOwner, Text: r, Ref: rs.ID})
 			}
 		}
 		if f.gates.Rule {
 			for _, r := range e.Rules {
-				clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelOwner, Text: "(enclosing type `" + rs.Name + "`) " + r})
+				clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelOwner, Text: r, Ref: rs.ID})
 			}
 		}
 		if f.gates.Link {
@@ -358,21 +359,17 @@ func (f RelatedFinder) cluesFor(rs RelatedSymbol) []unit.Clue {
 		// both are constraints on this change. Its cases/links stay out: another
 		// symbol's scenario checklist and see-alsos are noise here.
 		if f.gates.Spec && e.Spec != "" {
-			clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelUsed, Text: "(used type `" + rs.Name + "`) " + e.Spec, Ref: rs.Name})
+			clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelUsed, Text: e.Spec, Ref: rs.Name})
 		}
 		if f.gates.Rule {
 			for _, r := range e.Rules {
-				clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelUsed, Text: "(used type `" + rs.Name + "`) " + r, Ref: rs.Name})
+				clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelUsed, Text: r, Ref: rs.Name})
 			}
 		}
 	}
 	if f.gates.Doc && rs.DocFile != "" {
 		if doc := extractDocFromFile(rs.DocFile, rs.DocName); doc != "" {
-			label := "used type `" + rs.Ref + "`"
-			if rs.Relation == unit.RelOwner {
-				label = "enclosing type `" + rs.Name + "`"
-			}
-			clues = append(clues, unit.Clue{Kind: unit.ClueDoc, Relation: rs.Relation, Text: label + " (docstring): " + doc, Ref: rs.Ref})
+			clues = append(clues, unit.Clue{Kind: unit.ClueDoc, Relation: rs.Relation, Text: doc, Ref: rs.Ref})
 		}
 	}
 	return clues

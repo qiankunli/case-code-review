@@ -16,7 +16,6 @@ type neighborFunc func(funcID string) []string
 type docRider struct {
 	repoDir  string
 	relation unit.Relation
-	label    string
 }
 
 // walkForSpecs walks up to depth hops outward from start along neighborFn,
@@ -55,7 +54,7 @@ func walkForSpecs(idx spec.Index, start []string, neighborFn neighborFunc, depth
 						docClues = append(docClues, unit.Clue{
 							Kind:     unit.ClueDoc,
 							Relation: doc.relation,
-							Text:     doc.label + " `" + nb + "` (docstring): " + text,
+							Text:     text,
 							Ref:      nb,
 						})
 					}

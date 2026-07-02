@@ -35,13 +35,13 @@ func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
 	}
 	var doc *docRider
 	if f.Doc {
-		doc = &docRider{repoDir: f.RepoDir, relation: unit.RelCallee, label: "callee"}
+		doc = &docRider{repoDir: f.RepoDir, relation: unit.RelCallee}
 	}
 	return walkForSpecs(f.Index, u.AllSymbols(), f.callees, f.Depth, max, doc, func(id string) unit.Clue {
 		return unit.Clue{
 			Kind:     unit.ClueSpec,
 			Relation: unit.RelCallee,
-			Text:     "(depends on callee " + id + ", which guarantees)\n" + f.Index.Render([]string{id}),
+			Text:     f.Index.Render([]string{id}),
 			Ref:      id,
 		}
 	})
