@@ -19,9 +19,10 @@ const (
 	Plan         Gate = "plan"          // PLAN_TASK pre-pass per unit
 	CallChain    Gate = "callchain"     // call-chain merge axis (cross-file units via call graph)
 	CallerCallee Gate = "caller_callee" // caller/callee context clues (call-graph grep)
-	SpecCase     Gate = "spec_case"     // spec/case contract clues from spec.json
-	Rule         Gate = "rule"          // function-level @rule clues
-	Link         Gate = "link"          // @link see-also clues
+	SpecCase     Gate = "spec_case"     // spec/case contract clues (authored; all relations)
+	Rule         Gate = "rule"          // @rule clues (authored; all relations)
+	Link         Gate = "link"          // @link see-also clues (authored; all relations)
+	Doc          Gate = "doc"           // docstring clues (derived from source; all relations)
 	History      Gate = "history"       // prior-review findings clues (reconciliation)
 	ReviewFilter Gate = "review_filter" // file-level pass dropping provably-wrong comments
 	Relocation   Gate = "relocation"    // LLM re-location of comments to the right line
@@ -41,9 +42,10 @@ var registry = map[Gate]def{
 	Plan:         {true, "PLAN_TASK pre-pass per unit"},
 	CallChain:    {true, "call-chain merge axis (cross-file units via call graph)"},
 	CallerCallee: {true, "caller/callee context clues (call-graph grep)"},
-	SpecCase:     {true, "spec/case contract clues from spec.json"},
-	Rule:         {true, "function-level @rule clues"},
-	Link:         {true, "@link see-also clues"},
+	SpecCase:     {true, "spec/case contract clues (authored; all relations)"},
+	Rule:         {true, "@rule clues (authored; all relations)"},
+	Link:         {true, "@link see-also clues (authored; all relations)"},
+	Doc:          {true, "docstring clues (derived from source; all relations)"},
 	History:      {true, "prior-review findings clues (reconciliation)"},
 	ReviewFilter: {true, "file-level pass dropping provably-wrong comments"},
 	Relocation:   {true, "LLM re-location of comments to the right line"},

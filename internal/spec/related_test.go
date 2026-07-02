@@ -9,7 +9,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
-var allGates = SelfGates{Spec: true, Rule: true, Link: true}
+var allGates = KindGates{Spec: true, Rule: true, Link: true, Doc: true}
 
 func write(t *testing.T, path, content string) {
 	t.Helper()
@@ -74,31 +74,49 @@ func TestRelatedFinder_SelfMarks(t *testing.T) {
 	}
 }
 
-func TestRelatedFinder_SelfGates(t *testing.T) {
+// A kind gate switches its evidence kind off across EVERY relation — the
+// ablation unit matches the relation×kind matrix.
+func TestRelatedFinder_KindGatesAreKindWide(t *testing.T) {
 	idx, err := Parse([]byte(`{
-	  "trace.py::Svc": { "cases": [], "rules": ["type-wide rule"] },
+	  "trace.py::Svc": { "spec": "type contract", "cases": [], "rules": ["type-wide rule"] },
 	  "trace.py::Svc.get": { "spec": "self spec", "cases": [], "rules": ["self rule"], "links": ["docs/x.md"] }
 	}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	u := unit.UnitOf(unit.Fragment{Path: "trace.py", Symbols: []string{"trace.py::Svc.get"}})
-	clues := NewRelatedFinder(Catalog{Local: idx}, "", SelfGates{}).Find(u) // all self kinds gated off
 
+	// all kinds off → nothing, regardless of relation (owner rule included).
+	if got := NewRelatedFinder(Catalog{Local: idx}, "", KindGates{}).Find(u); got != nil {
+		t.Errorf("all kinds gated off should find nothing, got %+v", got)
+	}
+
+	// rule kind alone → self rule + owner rule, but no spec of either relation.
+	clues := NewRelatedFinder(Catalog{Local: idx}, "", KindGates{Rule: true}).Find(u)
+	var selfRule, ownerRule, anySpec bool
 	for _, c := range clues {
-		if c.Relation == unit.RelSelf {
-			t.Errorf("self clues must be gated off, got %+v", c)
+		switch {
+		case c.Kind == unit.ClueRule && c.Relation == unit.RelSelf:
+			selfRule = true
+		case c.Kind == unit.ClueRule && c.Relation == unit.RelOwner:
+			ownerRule = true
+		case c.Kind == unit.ClueSpec:
+			anySpec = true
 		}
 	}
-	// the owner relation is not gated: the enclosing type's rule still fires.
-	found := false
-	for _, c := range clues {
-		if c.Relation == unit.RelOwner && c.Kind == unit.ClueRule && strings.Contains(c.Text, "type-wide rule") {
-			found = true
-		}
+	if !selfRule || !ownerRule || anySpec {
+		t.Errorf("rule-only gates: want self+owner rules and no spec, got %+v", clues)
 	}
-	if !found {
-		t.Errorf("owner rule should survive self gates, got %+v", clues)
+}
+
+// The doc kind gate silences derived docstrings (here: the owner's).
+func TestRelatedFinder_DocGate(t *testing.T) {
+	repo := t.TempDir()
+	write(t, filepath.Join(repo, "trace.py"),
+		"class Svc:\n    \"\"\"Type contract.\"\"\"\n\n    def get(self):\n        ...\n")
+	u := unit.UnitOf(unit.Fragment{Path: "trace.py", Symbols: []string{"trace.py::Svc.get"}})
+	if got := NewRelatedFinder(Catalog{}, repo, KindGates{Spec: true, Rule: true, Link: true}).Find(u); got != nil {
+		t.Errorf("doc gated off should silence docstrings, got %+v", got)
 	}
 }
 
@@ -202,6 +220,27 @@ func TestRelatedFinder_UsedRule(t *testing.T) {
 		if c.Relation == unit.RelUsed {
 			t.Errorf("own symbol should not self-inject, got %+v", c)
 		}
+	}
+}
+
+// A used symbol's authored spec is a contract on this change too (higher signal
+// than its docstring) — injected alongside its rules, labelled the same way.
+func TestRelatedFinder_UsedSpec(t *testing.T) {
+	idx, err := Parse([]byte(`{
+	  "mw/trace.go::PhaseEventMiddleware": { "spec": "accumulates one request's phase events", "cases": [] }
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := unit.UnitOf(unit.Fragment{
+		Path:    "handler.go",
+		Symbols: []string{"handler.go::NewHandler"},
+		Diff:    "+\tmw := PhaseEventMiddleware()\n",
+	})
+	clues := NewRelatedFinder(Catalog{Local: idx}, "", allGates).Find(u)
+	if len(clues) != 1 || clues[0].Kind != unit.ClueSpec || clues[0].Relation != unit.RelUsed ||
+		!strings.Contains(clues[0].Text, "accumulates one request's phase events") {
+		t.Fatalf("want the used type's spec as a used-relation spec clue, got %+v", clues)
 	}
 }
 
