@@ -53,4 +53,5 @@ diff ─Splitter─▶ Fragment ─Merger─▶ Unit ─ClueFinder 找 Clue(spec
 - spec/case/rule/link 资产、各语言写法、`spec.json` schema、symbol-id 契约、**产 `spec.json` 的 `specgen`**（Go + Python）：[`spec-case`](https://github.com/qiankunli/spec-case)
 - 查覆盖 / 调试：`ccr review --dry-run` 打印每个 review unit 装配的上下文，不调 LLM（端到端：marker → specgen → spec.json → `--dry-run`）
 - Unit 模型：`Fragment` 原子 + `Unit` 作用域、两条合并轴（call-chain 语义 / file 成本）、clue 后置——`docs/unit-model.md`
+- Context 模型：unit → dossier——`Clue`(kind: spec/case/rule/link/doc) × `Relation`(self/owner/caller/callee/used) 两轴正交、doc 运行时抽取（adoption-free）、symbol-id 仓内 / fqn 跨仓、依赖 spec 随包发——`docs/context-model.md`
 - 上游归属（Apache-2.0 衍生）：`NOTICE`
