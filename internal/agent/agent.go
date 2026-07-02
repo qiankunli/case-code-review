@@ -630,9 +630,10 @@ func dedupClues(clues unit.Dossier) unit.Dossier {
 
 // renderClues groups a Dossier into the prompt's context blocks by clue Kind: the
 // spec/case contract + docstrings ({{spec_cases}}), the @rule criteria, the see-also
-// links ({{see_also}}), and a previous review's findings ({{prior_findings}}). Each
-// clue's Text already carries its relation label (owner/used/caller…). The rule.json
-// text is merged with rules by the caller.
+// links ({{see_also}}), and a previous review's findings ({{prior_findings}}). Clue
+// Text is raw content; how it reached the unit is worded here via clueLabel — one
+// place to change, and dedup upstream compares raw content. The rule.json text is
+// merged with rules by the caller.
 func renderClues(clues unit.Dossier) (specCases, rules, seeAlso, priorFindings string) {
 	var specBlocks, ruleLines, linkLines, historyBlocks []string
 	for _, c := range clues {
@@ -640,10 +641,10 @@ func renderClues(clues unit.Dossier) (specCases, rules, seeAlso, priorFindings s
 		case unit.ClueSpec, unit.ClueDoc:
 			// Contracts/context the change must respect: own spec, the enclosing
 			// type's spec, the caller's governing spec, callee contracts, and
-			// referenced-type docstrings — differentiated by the label in Text.
-			specBlocks = append(specBlocks, c.Text)
+			// referenced-type docstrings — differentiated by the relation label.
+			specBlocks = append(specBlocks, clueLabel(c)+c.Text)
 		case unit.ClueRule:
-			ruleLines = append(ruleLines, "- "+c.Text)
+			ruleLines = append(ruleLines, "- "+clueLabel(c)+c.Text)
 		case unit.ClueLink:
 			linkLines = append(linkLines, "- "+c.Text)
 		case unit.ClueHistory:
@@ -653,10 +654,47 @@ func renderClues(clues unit.Dossier) (specCases, rules, seeAlso, priorFindings s
 		default:
 			// A new ClueKind added without a case here surfaces as context rather
 			// than being silently dropped.
-			specBlocks = append(specBlocks, c.Text)
+			specBlocks = append(specBlocks, clueLabel(c)+c.Text)
 		}
 	}
 	return strings.Join(specBlocks, "\n"), strings.Join(ruleLines, "\n"), strings.Join(linkLines, "\n"), strings.Join(historyBlocks, "\n")
+}
+
+// clueLabel words how a clue reached the unit, from (relation, kind, ref) — the
+// relation×kind label table. self needs no label (it IS the changed symbol), and
+// a self/owner spec none either (Index.Render embeds the symbol-id).
+func clueLabel(c unit.Clue) string {
+	switch c.Relation {
+	case unit.RelOwner:
+		name := c.Ref
+		if _, after, ok := strings.Cut(name, "::"); ok {
+			name = after // display the bare type name, not the whole symbol-id
+		}
+		switch c.Kind {
+		case unit.ClueDoc:
+			return "enclosing type `" + name + "` (docstring): "
+		case unit.ClueSpec:
+			return "" // Render output already carries the symbol-id
+		default:
+			return "(enclosing type `" + name + "`) "
+		}
+	case unit.RelUsed:
+		if c.Kind == unit.ClueDoc {
+			return "used type `" + c.Ref + "` (docstring): "
+		}
+		return "(used type `" + c.Ref + "`) "
+	case unit.RelCaller:
+		if c.Kind == unit.ClueDoc {
+			return "caller `" + c.Ref + "` (docstring): "
+		}
+		return "(governing spec inherited from caller " + c.Ref + ")\n"
+	case unit.RelCallee:
+		if c.Kind == unit.ClueDoc {
+			return "callee `" + c.Ref + "` (docstring): "
+		}
+		return "(depends on callee " + c.Ref + ", which guarantees)\n"
+	}
+	return ""
 }
 
 // reviewUnit performs the Plan Phase + Main Loop for a single review Unit.
