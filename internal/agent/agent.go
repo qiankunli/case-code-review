@@ -105,10 +105,11 @@ type Args struct {
 	// injected into plan and main_task prompts via {{requirement_background}}.
 	Background string
 
-	// SpecIndex is the loaded spec.json (symbol-id -> spec/cases). A review Unit's
-	// covered functions are looked up here and injected as the contract checklist
-	// via {{spec_cases}}. Nil when no spec.json is configured.
-	SpecIndex spec.Index
+	// Specs is the loaded spec knowledge: this repo's entries by symbol-id plus
+	// dependency entries by fqn (two address spaces — see spec.Catalog). A review
+	// Unit's related symbols are looked up here and injected as the contract
+	// checklist via {{spec_cases}}. Zero value when no spec is configured.
+	Specs spec.Catalog
 
 	// HistoryIndex is the loaded --history (symbol-id -> prior findings). A unit's
 	// covered functions are looked up here and injected via {{prior_findings}} so
@@ -189,7 +190,7 @@ func New(args Args) *Agent {
 	// honored when the diff touches it). See docs/context-model.md.
 	f := args.Features
 	finders := []unit.ClueFinder{
-		spec.NewRelatedFinder(args.SpecIndex, args.RepoDir, spec.SelfGates{
+		spec.NewRelatedFinder(args.Specs, args.RepoDir, spec.SelfGates{
 			Spec: f.Enabled(feature.SpecCase),
 			Rule: f.Enabled(feature.Rule),
 			Link: f.Enabled(feature.Link),
@@ -200,9 +201,11 @@ func New(args Args) *Agent {
 	}
 	var costlyFinders []unit.ClueFinder
 	if f.Enabled(feature.CallerCallee) {
+		// The walk resolves callers/callees inside this repo, so it only ever sees
+		// local symbol-ids — it takes the local index, not the catalog.
 		costlyFinders = append(costlyFinders,
-			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.SpecIndex, Runner: args.GitRunner},
-			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.SpecIndex, Runner: args.GitRunner},
+			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner},
+			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner},
 		)
 	}
 	a := &Agent{

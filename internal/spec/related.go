@@ -24,12 +24,16 @@ var identifier = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 // RelatedSymbol is one symbol reached from a review unit along a typed relation —
 // what the relation axis hands to the source axis.
 type RelatedSymbol struct {
-	ID       string // spec-index key ("" when the symbol isn't indexed)
+	ID       string // local symbol-id ("" when the symbol isn't in this repo's index)
 	Relation unit.Relation
 	Name     string // bare name as referenced (labels authored marks)
 	Ref      string // Clue.Ref for the doc clue (owner: symbol-id; used: fqn)
 	DocFile  string // source file for docstring extraction ("" = no doc)
 	DocName  string // symbol name inside DocFile
+	// Entry is the resolved spec entry when the collector already knows it —
+	// required for dependency symbols, which have no local symbol-id (they
+	// resolve by fqn). Nil means "look ID up in the local index".
+	Entry *Entry
 }
 
 // RelationCollector finds the symbols related to a unit along one relation.
@@ -112,29 +116,43 @@ func ownerName(ownerID string) string {
 // referencing file's imports to the symbol's fqn (Python from-imports, Go
 // pkg.Symbol selectors) — disambiguating same-named types and reaching a
 // *dependency's* symbols cross-repo; (2) failing that, by bare name against the
-// index's non-method symbols (intra-repo). An import-resolved symbol also carries
-// its source file, so its docstring is available even when it has no spec entry
-// (adoption-free).
+// **local** index's non-method symbols. Bare names never match dependency
+// entries: a dependency symbol is only reachable through its fqn (its relpath
+// keys belong to another repo's address space). An import-resolved symbol also
+// carries its source file, so its docstring is available even when it has no
+// spec entry (adoption-free).
 type usedCollector struct {
-	byName  map[string][]string // bare symbol name -> symbol-ids (non-method only)
-	byFqn   map[string]string   // fqn -> symbol-id (precise, incl. cross-repo deps)
+	byName  map[string][]string // bare symbol name -> local symbol-ids (non-method only)
+	byFqn   map[string]fqnHit   // fqn -> resolved entry (local entries win over deps)
 	repoDir string
 }
 
-// newUsedCollector precomputes the name/fqn indexes once (not per Unit). Symbol-ids
-// are processed in sorted order so the winner is deterministic when two entries
-// share an fqn (possible across merged spec.json layers).
-func newUsedCollector(idx Index, repoDir string) usedCollector {
+// fqnHit is one fqn-resolved entry; id is "" for a dependency entry (no local
+// symbol-id exists for it).
+type fqnHit struct {
+	id    string
+	entry Entry
+}
+
+// newUsedCollector precomputes the name/fqn indexes once (not per Unit). Local
+// symbol-ids are processed in sorted order so the winner is deterministic when
+// two entries share an fqn (possible across merged spec.json layers); local
+// entries override dependency entries on the same fqn.
+func newUsedCollector(cat Catalog, repoDir string) usedCollector {
 	byName := make(map[string][]string)
-	byFqn := make(map[string]string)
-	ids := make([]string, 0, len(idx))
-	for id := range idx {
+	byFqn := make(map[string]fqnHit)
+	for fqn, e := range cat.Deps {
+		byFqn[fqn] = fqnHit{entry: e}
+	}
+	ids := make([]string, 0, len(cat.Local))
+	for id := range cat.Local {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		if fqn := idx[id].Fqn; fqn != "" {
-			byFqn[fqn] = id
+		e := cat.Local[id]
+		if e.Fqn != "" {
+			byFqn[e.Fqn] = fqnHit{id: id, entry: e}
 		}
 		sym := id
 		if _, after, ok := strings.Cut(id, "::"); ok {
@@ -178,14 +196,14 @@ func (c usedCollector) Related(u unit.Unit) []RelatedSymbol {
 				continue
 			}
 			fqn := path + "." + sym
-			id, ok := c.byFqn[fqn]
+			hit, ok := c.byFqn[fqn]
 			if !ok {
 				continue
 			}
-			rs := RelatedSymbol{ID: id, Relation: unit.RelUsed, Name: sym, Ref: fqn}
-			// doc when the resolved entry's source is in this repo (a dependency's
-			// relpath isn't; its doc would need module-cache resolution — not yet).
-			if rel, dn, ok := strings.Cut(id, "::"); ok && c.repoDir != "" {
+			rs := RelatedSymbol{ID: hit.id, Relation: unit.RelUsed, Name: sym, Ref: fqn, Entry: &hit.entry}
+			// doc when the resolved entry is local, so its relpath is this repo's (a
+			// dependency's doc would need module-cache resolution — not yet).
+			if rel, dn, ok := strings.Cut(hit.id, "::"); ok && c.repoDir != "" {
 				if p := filepath.Join(c.repoDir, rel); fileExists(p) {
 					rs.DocFile, rs.DocName = p, dn
 				}
@@ -208,8 +226,8 @@ func (c usedCollector) Related(u unit.Unit) []RelatedSymbol {
 			if file, ok := resolvePyModuleFile(sym.module, roots); ok {
 				rs.DocFile, rs.DocName = file, sym.name
 			}
-			if id, ok := c.byFqn[fqn]; ok {
-				rs.ID = id
+			if hit, ok := c.byFqn[fqn]; ok {
+				rs.ID, rs.Entry = hit.id, &hit.entry
 				emit(rs)
 				continue // resolved precisely — skip bare-name (avoids same-name mismatch)
 			}
@@ -267,19 +285,19 @@ type SelfGates struct{ Spec, Rule, Link bool }
 
 // RelatedFinder is the unit.ClueFinder over the self/owner/used relations.
 type RelatedFinder struct {
-	index      Index
+	local      Index // this repo's entries; dependency entries reach cluesFor via RelatedSymbol.Entry
 	gates      SelfGates
 	collectors []RelationCollector
 }
 
-func NewRelatedFinder(idx Index, repoDir string, gates SelfGates) RelatedFinder {
+func NewRelatedFinder(cat Catalog, repoDir string, gates SelfGates) RelatedFinder {
 	return RelatedFinder{
-		index: idx,
+		local: cat.Local,
 		gates: gates,
 		collectors: []RelationCollector{
 			selfCollector{},
 			ownerCollector{repoDir: repoDir},
-			newUsedCollector(idx, repoDir),
+			newUsedCollector(cat, repoDir),
 		},
 	}
 }
@@ -294,15 +312,20 @@ func (f RelatedFinder) Find(u unit.Unit) []unit.Clue {
 	return clues
 }
 
-// cluesFor is the source axis: a related symbol's authored marks (spec index) and
-// derived docstring (source file), labelled by the relation that reached it.
+// cluesFor is the source axis: a related symbol's authored marks (its resolved
+// entry, or a local-index lookup) and derived docstring (source file), labelled
+// by the relation that reached it.
 func (f RelatedFinder) cluesFor(rs RelatedSymbol) []unit.Clue {
 	var clues []unit.Clue
-	e := f.index[rs.ID]
+	e := rs.Entry
+	if e == nil {
+		local := f.local[rs.ID]
+		e = &local
+	}
 	switch rs.Relation {
 	case unit.RelSelf:
 		if f.gates.Spec {
-			if r := f.index.Render([]string{rs.ID}); r != "" {
+			if r := f.local.Render([]string{rs.ID}); r != "" {
 				clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelSelf, Text: r})
 			}
 		}
@@ -315,7 +338,7 @@ func (f RelatedFinder) cluesFor(rs RelatedSymbol) []unit.Clue {
 			clues = append(clues, linkClues(e.Links, unit.RelSelf)...)
 		}
 	case unit.RelOwner:
-		if r := f.index.Render([]string{rs.ID}); r != "" {
+		if r := f.local.Render([]string{rs.ID}); r != "" {
 			clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelOwner, Text: r})
 		}
 		for _, r := range e.Rules {

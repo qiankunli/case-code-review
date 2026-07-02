@@ -53,7 +53,7 @@ func TestRelatedFinder_SelfMarks(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := unit.UnitOf(unit.Fragment{Path: "a.go", Symbols: []string{"a.go::Foo"}})
-	clues := NewRelatedFinder(idx, "", allGates).Find(u)
+	clues := NewRelatedFinder(Catalog{Local: idx}, "", allGates).Find(u)
 
 	byKind := map[unit.ClueKind][]unit.Clue{}
 	for _, c := range clues {
@@ -83,7 +83,7 @@ func TestRelatedFinder_SelfGates(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := unit.UnitOf(unit.Fragment{Path: "trace.py", Symbols: []string{"trace.py::Svc.get"}})
-	clues := NewRelatedFinder(idx, "", SelfGates{}).Find(u) // all self kinds gated off
+	clues := NewRelatedFinder(Catalog{Local: idx}, "", SelfGates{}).Find(u) // all self kinds gated off
 
 	for _, c := range clues {
 		if c.Relation == unit.RelSelf {
@@ -104,7 +104,7 @@ func TestRelatedFinder_SelfGates(t *testing.T) {
 
 func TestRelatedFinder_NilIndexSafe(t *testing.T) {
 	u := unit.UnitOf(unit.Fragment{Path: "x", Symbols: []string{"x::Unknown"}})
-	if got := NewRelatedFinder(nil, "", allGates).Find(u); got != nil {
+	if got := NewRelatedFinder(Catalog{}, "", allGates).Find(u); got != nil {
 		t.Errorf("nil index should find nothing, got %+v", got)
 	}
 }
@@ -118,7 +118,7 @@ func TestRelatedFinder_OwnerMarks(t *testing.T) {
 	}
 	// changing a *method* of PhaseEventMiddleware surfaces the class's markers
 	u := unit.UnitOf(unit.Fragment{Path: "trace.py", Symbols: []string{"trace.py::PhaseEventMiddleware.dispatch"}})
-	clues := NewRelatedFinder(idx, "", allGates).Find(u)
+	clues := NewRelatedFinder(Catalog{Local: idx}, "", allGates).Find(u)
 
 	var ruleText, specText string
 	for _, c := range clues {
@@ -141,7 +141,7 @@ func TestRelatedFinder_OwnerMarks(t *testing.T) {
 
 	// when the class itself is the changed symbol there is no owner (top-level).
 	self := unit.UnitOf(unit.Fragment{Path: "trace.py", Symbols: []string{"trace.py::PhaseEventMiddleware"}})
-	for _, c := range NewRelatedFinder(idx, "", allGates).Find(self) {
+	for _, c := range NewRelatedFinder(Catalog{Local: idx}, "", allGates).Find(self) {
 		if c.Relation == unit.RelOwner {
 			t.Errorf("top-level symbol has no owner, got %+v", c)
 		}
@@ -155,7 +155,7 @@ func TestRelatedFinder_OwnerDocstring(t *testing.T) {
 
 	// no spec.json markers at all — docstring is the only (adoption-free) context.
 	u := unit.UnitOf(unit.Fragment{Path: "trace.py", Symbols: []string{"trace.py::PhaseEventMiddleware.dispatch"}})
-	clues := NewRelatedFinder(Index{}, repo, allGates).Find(u)
+	clues := NewRelatedFinder(Catalog{}, repo, allGates).Find(u)
 
 	if len(clues) != 1 || clues[0].Kind != unit.ClueDoc || clues[0].Relation != unit.RelOwner ||
 		clues[0].Ref != "trace.py::PhaseEventMiddleware" ||
@@ -172,7 +172,7 @@ func TestRelatedFinder_UsedRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rf := NewRelatedFinder(idx, "", allGates)
+	rf := NewRelatedFinder(Catalog{Local: idx}, "", allGates)
 
 	// A unit that USES PhaseEventMiddleware picks up its class rule, even though
 	// the middleware's own definition isn't in this diff.
@@ -224,7 +224,7 @@ func TestRelatedFinder_FqnDisambiguates(t *testing.T) {
 		Symbols: []string{"app/handler.py::create"},
 		Diff:    "+    return Middleware()\n",
 	})
-	clues := NewRelatedFinder(idx, repo, allGates).Find(u)
+	clues := NewRelatedFinder(Catalog{Local: idx}, repo, allGates).Find(u)
 	if len(clues) != 1 || !strings.Contains(clues[0].Text, "per-request only") {
 		t.Fatalf("want only the import-resolved (framework) rule, got %+v", clues)
 	}
@@ -248,7 +248,7 @@ func TestRelatedFinder_GoSelectorFqn(t *testing.T) {
 		Symbols: []string{"app/handler.go::create"},
 		Diff:    "+\t_ = trace.Middleware{}\n",
 	})
-	clues := NewRelatedFinder(idx, repo, allGates).Find(u)
+	clues := NewRelatedFinder(Catalog{Local: idx}, repo, allGates).Find(u)
 	if len(clues) != 1 || !strings.Contains(clues[0].Text, "per-request only") {
 		t.Fatalf("want only the import-resolved (framework) rule, got %+v", clues)
 	}
@@ -273,7 +273,7 @@ func TestRelatedFinder_GoUsedDocstring(t *testing.T) {
 		Symbols: []string{"app/handler.go::create"},
 		Diff:    "+\t_ = trace.Middleware{}\n",
 	})
-	clues := NewRelatedFinder(idx, repo, allGates).Find(u)
+	clues := NewRelatedFinder(Catalog{Local: idx}, repo, allGates).Find(u)
 	var rule, doc bool
 	for _, c := range clues {
 		if c.Relation != unit.RelUsed {
@@ -291,6 +291,41 @@ func TestRelatedFinder_GoUsedDocstring(t *testing.T) {
 	}
 }
 
+// A dependency entry lives in its own address space: reachable ONLY through an
+// import-resolved fqn — never by bare name, and never as a local symbol's own
+// spec (its relpath keys belong to the dependency's tree, not this repo's).
+func TestRelatedFinder_DepEntryOnlyReachableByFqn(t *testing.T) {
+	cat := Catalog{Deps: map[string]Entry{
+		"framework.mw.trace.Middleware": {Fqn: "framework.mw.trace.Middleware", Rules: []string{"per-request only"}},
+	}}
+	repo := t.TempDir()
+
+	// bare reference, no import → the dependency rule must NOT fire
+	write(t, filepath.Join(repo, "app", "bare.py"), "def create():\n    return Middleware()\n")
+	bare := unit.UnitOf(unit.Fragment{
+		Path:    "app/bare.py",
+		Symbols: []string{"app/bare.py::create"},
+		Diff:    "+    return Middleware()\n",
+	})
+	if got := NewRelatedFinder(cat, repo, allGates).Find(bare); got != nil {
+		t.Fatalf("dependency entry must not match by bare name, got %+v", got)
+	}
+
+	// import-resolved reference → the dependency rule fires via fqn
+	write(t, filepath.Join(repo, "app", "handler.py"),
+		"from framework.mw.trace import Middleware\n\ndef create():\n    return Middleware()\n")
+	imported := unit.UnitOf(unit.Fragment{
+		Path:    "app/handler.py",
+		Symbols: []string{"app/handler.py::create"},
+		Diff:    "+    return Middleware()\n",
+	})
+	clues := NewRelatedFinder(cat, repo, allGates).Find(imported)
+	if len(clues) != 1 || clues[0].Kind != unit.ClueRule || clues[0].Relation != unit.RelUsed ||
+		!strings.Contains(clues[0].Text, "per-request only") {
+		t.Fatalf("want the dependency rule via fqn, got %+v", clues)
+	}
+}
+
 // The dependency case: the used type has no spec entry at all — its docstring is
 // read from the venv source (adoption-free).
 func TestRelatedFinder_DepDocstring(t *testing.T) {
@@ -305,7 +340,7 @@ func TestRelatedFinder_DepDocstring(t *testing.T) {
 		Symbols: []string{"app/handler.py::create"},
 		Diff:    "+    return PhaseEventMiddleware()\n",
 	})
-	clues := NewRelatedFinder(nil, repo, allGates).Find(u)
+	clues := NewRelatedFinder(Catalog{}, repo, allGates).Find(u)
 	if len(clues) != 1 || clues[0].Kind != unit.ClueDoc || clues[0].Relation != unit.RelUsed ||
 		clues[0].Ref != "framework.middleware.trace.PhaseEventMiddleware" ||
 		!strings.Contains(clues[0].Text, "Per-request only — do not cache/reuse.") {

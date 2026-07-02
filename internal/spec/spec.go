@@ -41,6 +41,18 @@ type Entry struct {
 // Index is spec.json: symbol-id (<relpath>::<symbol>) -> Entry.
 type Index map[string]Entry
 
+// Catalog is the review-time spec knowledge, kept as two address spaces that
+// must never mix: Local is this repo's entries keyed by symbol-id (relpath is
+// meaningful here); Deps are entries discovered inside installed dependencies,
+// keyed by fqn — the only identity that survives crossing a repo boundary. A
+// dependency's relpath keys are relative to *its* repo, so joining them into
+// Local would let a dependency entry masquerade as a local symbol's own spec.
+// The zero Catalog means "no spec configured" and is safe everywhere.
+type Catalog struct {
+	Local Index            // symbol-id -> Entry (this repo's layers: global/project/--spec)
+	Deps  map[string]Entry // fqn -> Entry (from packaged dependency spec.json)
+}
+
 // Parse decodes spec.json bytes.
 func Parse(data []byte) (Index, error) {
 	var idx Index
@@ -50,57 +62,52 @@ func Parse(data []byte) (Index, error) {
 	return idx, nil
 }
 
-// Load reads spec.json from the priority chain and merges the layers, mirroring
-// how review rules are loaded:
+// Load reads spec.json from the priority chain into a Catalog. Local layers,
+// mirroring how review rules are loaded:
 //
 //  1. customPath (--spec)        — highest
 //  2. <repoDir>/.casecodereview/spec.json   — project
 //  3. ~/.casecodereview/spec.json           — global (lowest)
 //
-// Higher layers override same-keyed (symbol-id) entries. Project/global layers are
-// optional (skipped if absent); a non-empty customPath that is missing is an
-// error. Returns a nil Index if no layer exists.
-func Load(repoDir, customPath string) (Index, error) {
-	merged := Index{}
+// Higher layers override same-keyed (symbol-id) entries. Project/global layers
+// are optional (skipped if absent); a non-empty customPath that is missing is an
+// error. Dependency spec.json (shipped inside installed deps) goes into
+// Catalog.Deps keyed by fqn — never into Local (different address space); its
+// discovery is best-effort and never fails a review. Returns the zero Catalog
+// when nothing exists.
+func Load(repoDir, customPath string) (Catalog, error) {
+	local := Index{}
 	found := false
 
 	// Load low → high so higher layers win on key collision.
-	// Dependency spec.json (shipped inside installed deps) is the lowest layer:
-	// local spec always overrides a dependency's on key collision. Best-effort —
-	// dependency discovery never fails a review.
-	if repoDir != "" {
-		if dep := loadDepSpecs(repoDir); len(dep) > 0 {
-			mergeInto(merged, dep)
-			found = true
-		}
-	}
 	if home, err := os.UserHomeDir(); err == nil {
-		if err := mergeOptional(merged, filepath.Join(home, ".casecodereview", "spec.json"), &found); err != nil {
-			return nil, err
+		if err := mergeOptional(local, filepath.Join(home, ".casecodereview", "spec.json"), &found); err != nil {
+			return Catalog{}, err
 		}
 	}
 	if repoDir != "" {
-		if err := mergeOptional(merged, filepath.Join(repoDir, ".casecodereview", "spec.json"), &found); err != nil {
-			return nil, err
+		if err := mergeOptional(local, filepath.Join(repoDir, ".casecodereview", "spec.json"), &found); err != nil {
+			return Catalog{}, err
 		}
 	}
 	if customPath != "" {
 		data, err := os.ReadFile(customPath) // required: a given --spec path must exist
 		if err != nil {
-			return nil, err
+			return Catalog{}, err
 		}
 		idx, err := Parse(data)
 		if err != nil {
-			return nil, err
+			return Catalog{}, err
 		}
-		mergeInto(merged, idx)
+		mergeInto(local, idx)
 		found = true
 	}
 
-	if !found {
-		return nil, nil
+	cat := Catalog{Deps: loadDepSpecs(repoDir)}
+	if found {
+		cat.Local = local
 	}
-	return merged, nil
+	return cat, nil
 }
 
 // mergeOptional loads and merges path if it exists; a missing file is skipped.
