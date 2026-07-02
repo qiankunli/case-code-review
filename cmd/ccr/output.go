@@ -183,7 +183,9 @@ type jsonSummary struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int64  `json:"cache_write_tokens,omitempty"`
-	Elapsed          string `json:"elapsed"`
+	// ElapsedSec is the review's wall-clock cost in whole seconds — numeric so
+	// consumers (e.g. an MR-comment header) never parse a Go duration string.
+	ElapsedSec int64 `json:"elapsed_sec"`
 	// Models maps each routing alias that served a response to its count (deduped).
 	// The review's model identity — present even on a clean (no-finding) review.
 	// Omitted for a single-model (non-routing) run.
@@ -196,7 +198,10 @@ type jsonToolCalls struct {
 }
 
 type jsonOutput struct {
-	Status         string               `json:"status"`
+	Status string `json:"status"`
+	// Version is the reviewing ccr's own version (main.Version) — the review's
+	// tool identity, present on every JSON shape including skipped/no-files.
+	Version        string               `json:"version,omitempty"`
 	Message        string               `json:"message,omitempty"`
 	Summary        *jsonSummary         `json:"summary,omitempty"`
 	ToolCalls      *jsonToolCalls       `json:"tool_calls"`
@@ -208,6 +213,7 @@ type jsonOutput struct {
 func outputJSON(comments []model.LlmComment) error {
 	out := jsonOutput{
 		Status:   "success",
+		Version:  Version,
 		Comments: comments,
 	}
 	if len(comments) == 0 {
@@ -223,6 +229,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, models map[string]int) error {
 	out := jsonOutput{
 		Status:   "success",
+		Version:  Version,
 		Comments: comments,
 		Summary: &jsonSummary{
 			FilesReviewed:    filesReviewed,
@@ -232,7 +239,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			OutputTokens:     outputTokens,
 			CacheReadTokens:  cacheReadTokens,
 			CacheWriteTokens: cacheWriteTokens,
-			Elapsed:          duration.Round(time.Second).String(),
+			ElapsedSec:       int64(duration.Round(time.Second).Seconds()),
 			Models:           models,
 		},
 		ProjectSummary: projectSummary,
@@ -272,6 +279,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 func outputJSONNoFiles() error {
 	out := jsonOutput{
 		Status:   "skipped",
+		Version:  Version,
 		Message:  "No supported files changed.",
 		Comments: []model.LlmComment{},
 		ToolCalls: &jsonToolCalls{
