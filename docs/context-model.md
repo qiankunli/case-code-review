@@ -48,7 +48,7 @@ diff ─Splitter→ Fragment ─Merger(callchain + file)→ Unit
 
 5. **门禁**：self 关系的 spec/rule/link 随 feature gate（消融用）；`owner/used` 恒开——廉价（文件读 + map 查，无 LLM/grep）且属正确性信号（authored 的用法约束必须 honor）；gate 只给**费边**（caller/callee 的 call-graph grep）做 leave-one-out。
 
-6. **跨仓 = spec 随包发（Model A）+ 读依赖源码 doc**：依赖把自己的 `spec.json`（entry 带 fqn）打进包，ccr 审消费仓时发现并入（Go 按 go.mod requires 查 `GOMODCACHE`，Python 扫 venv site-packages），合并在**最低优先级**（本仓覆盖依赖）；docstring 直接读依赖源码（venv / 本仓）。
+6. **跨仓 = spec 随包发（Model A）+ 读依赖源码 doc，两个地址空间不混装**：依赖把自己的 `spec.json`（entry 带 fqn）打进包，ccr 审消费仓时发现（Go 按 go.mod requires 查 `GOMODCACHE`，Python 扫 venv site-packages）。发现结果**只以 fqn 为键**放进 Catalog 的依赖空间，与本仓的 symbol-id 空间分开——依赖的 relpath 属于它自己的仓，混进本仓 key 空间会让依赖 entry 冒充本仓符号的 spec、也会让裸名匹配跨仓误中。所以：依赖符号**只经 import→fqn 可达**（无 fqn 的依赖 entry 丢弃）；同 fqn 冲突时本仓 entry 胜；docstring 直接读依赖源码（venv / 本仓）。
 
 7. **可测性**：dry-run 的 `clue_coverage` 是 **relation × kind 矩阵**（键 `owner/rule`、`used/doc`、`caller/spec`…），每格在真实 diff 上 fire 多少免费可见——消融对比（feature gate）之外的常开观测层。
 

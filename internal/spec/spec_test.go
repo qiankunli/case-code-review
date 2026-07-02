@@ -74,29 +74,29 @@ func TestLoadChainCustomOverridesProject(t *testing.T) {
 	  "a.go::Baz": {"spec": "custom-baz"}
 	}`)
 
-	idx, err := Load(repo, custom)
+	cat, err := Load(repo, custom)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if idx["a.go::Foo"].Spec != "custom-foo" {
-		t.Errorf("custom should override project: got %q", idx["a.go::Foo"].Spec)
+	if cat.Local["a.go::Foo"].Spec != "custom-foo" {
+		t.Errorf("custom should override project: got %q", cat.Local["a.go::Foo"].Spec)
 	}
-	if idx["a.go::Bar"].Spec != "project-bar" {
-		t.Errorf("project-only entry should survive: got %q", idx["a.go::Bar"].Spec)
+	if cat.Local["a.go::Bar"].Spec != "project-bar" {
+		t.Errorf("project-only entry should survive: got %q", cat.Local["a.go::Bar"].Spec)
 	}
-	if idx["a.go::Baz"].Spec != "custom-baz" {
+	if cat.Local["a.go::Baz"].Spec != "custom-baz" {
 		t.Errorf("custom-only entry missing")
 	}
 }
 
-func TestLoadNoLayersReturnsNil(t *testing.T) {
+func TestLoadNoLayersReturnsZero(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	idx, err := Load(t.TempDir(), "")
+	cat, err := Load(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if idx != nil {
-		t.Errorf("no layers should return nil, got %v", idx)
+	if cat.Local != nil || cat.Deps != nil {
+		t.Errorf("no layers should return the zero catalog, got %+v", cat)
 	}
 }
 

@@ -7,22 +7,34 @@ import (
 )
 
 // loadDepSpecs discovers spec.json shipped inside the review repo's installed
-// dependencies (Model A: spec travels with the package) and returns their merged
-// index. Best-effort: any failure (no venv / module cache / unreadable file)
-// yields an empty index — a dependency's spec must never fail a review.
-//
-// Dependency entries keep their own (dependency-relative) symbol-id keys and carry
-// fqn. The used relation matches them by import-resolved fqn (or bare name), so a
-// diff that uses a dependency's type picks up that type's rule.
-func loadDepSpecs(repoDir string) Index {
-	out := Index{}
+// dependencies (Model A: spec travels with the package) and returns their
+// entries keyed by fqn — the only identity meaningful outside the dependency's
+// own repo. Entries without fqn are dropped: their symbol-id keys are relative
+// to the dependency's tree and must never join the consumer's address space.
+// Best-effort: any failure (no venv / module cache / unreadable file) yields
+// nil — a dependency's spec must never fail a review.
+func loadDepSpecs(repoDir string) map[string]Entry {
+	if repoDir == "" {
+		return nil
+	}
+	var out map[string]Entry
 	for _, p := range append(goDepSpecPaths(repoDir), pyDepSpecPaths(repoDir)...) {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			continue
 		}
-		if idx, err := Parse(data); err == nil {
-			mergeInto(out, idx)
+		idx, err := Parse(data)
+		if err != nil {
+			continue
+		}
+		for _, e := range idx {
+			if e.Fqn == "" {
+				continue
+			}
+			if out == nil {
+				out = map[string]Entry{}
+			}
+			out[e.Fqn] = e
 		}
 	}
 	return out
