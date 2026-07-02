@@ -30,6 +30,38 @@ func Undocumented() {}
 	}
 }
 
+func TestExtractGoDoc_GroupedAndGeneric(t *testing.T) {
+	src := `package x
+
+type (
+	// Grouped is declared inside a type block.
+	Grouped struct{}
+
+	Plain struct{}
+)
+
+// Single is a one-decl type block.
+type Single struct{}
+
+type Cache[K comparable] struct{}
+
+// Get returns the value.
+func (c *Cache[K]) Get() {}
+`
+	if got := extractGoDoc(src, "Grouped"); got != "Grouped is declared inside a type block." {
+		t.Errorf("grouped type doc = %q", got)
+	}
+	if got := extractGoDoc(src, "Plain"); got != "" {
+		t.Errorf("undocumented grouped type should be empty, got %q", got)
+	}
+	if got := extractGoDoc(src, "Single"); got != "Single is a one-decl type block." {
+		t.Errorf("single type doc = %q", got)
+	}
+	if got := extractGoDoc(src, "Cache.Get"); got != "Get returns the value." {
+		t.Errorf("generic-receiver method doc = %q", got)
+	}
+}
+
 func TestSymbolDocstring_Go(t *testing.T) {
 	repo := t.TempDir()
 	write(t, filepath.Join(repo, "mw", "trace.go"),
