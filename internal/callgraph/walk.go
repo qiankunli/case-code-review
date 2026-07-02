@@ -11,6 +11,14 @@ const defaultDepth = 2
 // its callees) as symbol-ids. CallerFinder and CalleeFinder differ only in this.
 type neighborFunc func(funcID string) []string
 
+// docRider configures the depth-1 neighbor docstring emission that rides on the
+// spec walk (nil = off — the doc kind gate, or no repo to read from).
+type docRider struct {
+	repoDir  string
+	relation unit.Relation
+	label    string
+}
+
 // walkForSpecs walks up to depth hops outward from start along neighborFn,
 // emitting a clue (via mkClue) for each neighbor that carries a spec. It keeps
 // the NEAREST spec-bearing neighbor on each branch: a spec-bearing neighbor is
@@ -19,11 +27,11 @@ type neighborFunc func(funcID string) []string
 // max caps the emitted spec clues. This is the shared engine for caller (walk up
 // to the governing spec) and callee (walk down to depended-on contracts).
 //
-// It also surfaces the docstring of each *direct* (depth-1) neighbor as a separate
-// doc clue (relation/docLabel), reusing the neighbors it already computed (no extra
-// grep) — an adoption-free supplement to spec.json. Doc clues have their own cap so
-// they never crowd out spec clues; skipped when repoDir is empty.
-func walkForSpecs(idx spec.Index, start []string, neighborFn neighborFunc, depth, max int, repoDir string, relation unit.Relation, docLabel string, mkClue func(id string) unit.Clue) []unit.Clue {
+// When doc is non-nil it also surfaces the docstring of each *direct* (depth-1)
+// neighbor as a doc clue, reusing the neighbors it already computed (no extra
+// grep) — an adoption-free supplement to spec.json. Doc clues have their own cap
+// so they never crowd out spec clues.
+func walkForSpecs(idx spec.Index, start []string, neighborFn neighborFunc, depth, max int, doc *docRider, mkClue func(id string) unit.Clue) []unit.Clue {
 	if depth <= 0 {
 		depth = defaultDepth
 	}
@@ -42,12 +50,12 @@ func walkForSpecs(idx spec.Index, start []string, neighborFn neighborFunc, depth
 					continue
 				}
 				visited[nb] = true
-				if d == 0 && repoDir != "" && len(docClues) < max {
-					if doc := spec.SymbolDocstring(repoDir, nb); doc != "" {
+				if d == 0 && doc != nil && len(docClues) < max {
+					if text := spec.SymbolDocstring(doc.repoDir, nb); text != "" {
 						docClues = append(docClues, unit.Clue{
 							Kind:     unit.ClueDoc,
-							Relation: relation,
-							Text:     docLabel + " `" + nb + "` (docstring): " + doc,
+							Relation: doc.relation,
+							Text:     doc.label + " `" + nb + "` (docstring): " + text,
 							Ref:      nb,
 						})
 					}

@@ -43,7 +43,7 @@ func TestCalleeFinder_PythonDocstring(t *testing.T) {
 		"validate.py": "def validate(req):\n    \"\"\"Rejects an empty tenant.\"\"\"\n    return None\n",
 	})
 	u := unit.UnitOf(unit.Fragment{Path: "svc.py", Symbols: []string{"svc.py::Svc.create"}})
-	clues := CalleeFinder{RepoDir: repo, Index: spec.Index{}}.Find(u)
+	clues := CalleeFinder{RepoDir: repo, Index: spec.Index{}, Doc: true}.Find(u)
 	if len(clues) != 1 || clues[0].Kind != unit.ClueDoc || clues[0].Relation != unit.RelCallee ||
 		clues[0].Ref != "validate.py::validate" || !strings.Contains(clues[0].Text, "Rejects an empty tenant") {
 		t.Fatalf("want callee docstring clue, got %+v", clues)

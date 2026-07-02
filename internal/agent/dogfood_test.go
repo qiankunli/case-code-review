@@ -54,7 +54,7 @@ func TestDogfoodContextAssembly(t *testing.T) {
 		splitter: unit.AutoSplitter{},
 		merger:   unit.WatermarkMerger{Watermark: defaultUnitWatermark},
 		finders: []unit.ClueFinder{
-			spec.NewRelatedFinder(spec.Catalog{Local: idx}, repo, spec.SelfGates{Spec: true, Rule: true, Link: true}),
+			spec.NewRelatedFinder(spec.Catalog{Local: idx}, repo, spec.KindGates{Spec: true, Rule: true, Link: true, Doc: true}),
 		},
 		costlyFinders: []unit.ClueFinder{
 			callgraph.CallerFinder{RepoDir: repo, Index: idx},
