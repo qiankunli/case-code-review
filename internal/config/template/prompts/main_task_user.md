@@ -9,6 +9,13 @@
 {{diff}}
 </current_file_diff>
 
+// The full post-change source of the reviewed file(s), in file_read's numbered-line
+// format. It is ALREADY provided — do NOT call file_read on these paths again; spend
+// tool calls only on OTHER files you actually need.
+<current_file_source>
+{{unit_source}}
+</current_file_source>
+
 Current time in the real world: {{current_system_date_time}}
 
 <user_task>
