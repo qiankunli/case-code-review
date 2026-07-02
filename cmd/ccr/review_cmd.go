@@ -73,7 +73,7 @@ func runReview(args []string) error {
 
 	// Loads the --spec path plus auto-discovered .casecodereview/spec.json layers, mirroring
 	// how rules are resolved. Nil when no layer exists.
-	specIndex, err := spec.Load(cc.RepoDir, opts.specPath)
+	specs, err := spec.Load(cc.RepoDir, opts.specPath)
 	if err != nil {
 		return fmt.Errorf("load spec: %w", err)
 	}
@@ -100,7 +100,7 @@ func runReview(args []string) error {
 		ConcurrentTaskTimeout: opts.perFileTimeout,
 		Model:                 rt.Model,
 		Background:            opts.background,
-		SpecIndex:             specIndex,
+		Specs:                 specs,
 		HistoryIndex:          historyIndex,
 		GitRunner:             cc.GitRunner,
 		Features:              features,
@@ -208,7 +208,7 @@ func runPreview(cc *commonContext, opts reviewOptions) error {
 // + caller/callee) without an LLM call — needs the spec index + rule resolver,
 // but no LLM runtime, so it works whether or not the LLM is configured.
 func runDryRun(cc *commonContext, opts reviewOptions) error {
-	specIndex, err := spec.Load(cc.RepoDir, opts.specPath)
+	specs, err := spec.Load(cc.RepoDir, opts.specPath)
 	if err != nil {
 		return fmt.Errorf("load spec: %w", err)
 	}
@@ -227,7 +227,7 @@ func runDryRun(cc *commonContext, opts reviewOptions) error {
 		Commit:       opts.commit,
 		FileFilter:   cc.FileFilter,
 		GitRunner:    cc.GitRunner,
-		SpecIndex:    specIndex,
+		Specs:        specs,
 		HistoryIndex: historyIndex,
 		SystemRule:   cc.Resolver,
 		Background:   opts.background,

@@ -64,13 +64,15 @@ func TestLoadDepSpecs_GoModCache(t *testing.T) {
 	os.WriteFile(filepath.Join(depDir, "spec.json"),
 		[]byte(`{"common/middleware/trace.go::PhaseEventMiddleware":{"fqn":"github.com/org/Framework/common/middleware/trace.PhaseEventMiddleware","cases":[],"rules":["per-request only"]}}`), 0o644)
 
-	idx := loadDepSpecs(repo)
-	e, ok := idx["common/middleware/trace.go::PhaseEventMiddleware"]
+	deps := loadDepSpecs(repo)
+	// dependency entries are keyed by fqn — their relpath keys belong to the
+	// dependency's own tree and never join the consumer's address space.
+	e, ok := deps["github.com/org/Framework/common/middleware/trace.PhaseEventMiddleware"]
 	if !ok {
-		t.Fatalf("dep spec not discovered/merged; got %v", keys(idx))
+		t.Fatalf("dep spec not discovered/merged; got %v", keys(deps))
 	}
-	if e.Fqn == "" || len(e.Rules) != 1 {
-		t.Errorf("entry missing fqn/rules: %+v", e)
+	if len(e.Rules) != 1 {
+		t.Errorf("entry missing rules: %+v", e)
 	}
 }
 
@@ -83,15 +85,15 @@ func TestLoadDepSpecs_PythonVenv(t *testing.T) {
 	os.WriteFile(filepath.Join(sp, "spec.json"),
 		[]byte(`{"framework/mw/trace.py::PhaseEventMiddleware":{"fqn":"framework.mw.trace.PhaseEventMiddleware","cases":[],"rules":["per-request only"]}}`), 0o644)
 
-	idx := loadDepSpecs(repo)
-	if _, ok := idx["framework/mw/trace.py::PhaseEventMiddleware"]; !ok {
-		t.Fatalf("python venv dep spec not discovered; got %v", keys(idx))
+	deps := loadDepSpecs(repo)
+	if _, ok := deps["framework.mw.trace.PhaseEventMiddleware"]; !ok {
+		t.Fatalf("python venv dep spec not discovered; got %v", keys(deps))
 	}
 }
 
-func keys(idx Index) []string {
-	out := make([]string, 0, len(idx))
-	for k := range idx {
+func keys(m map[string]Entry) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
 		out = append(out, k)
 	}
 	return out
