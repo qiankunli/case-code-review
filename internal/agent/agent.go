@@ -183,32 +183,21 @@ func New(args Args) *Agent {
 		})
 	}
 	// Clue gates are applied here (finder assembly) rather than in findClues, so a
-	// disabled clue kind simply never runs its finder.
+	// disabled clue kind simply never fires. The self-relation kinds are gated;
+	// the owner/used relations are always on — cheap (file reads + map lookups)
+	// correctness signals (an authored usage rule / enclosing-type contract must be
+	// honored when the diff touches it). See docs/context-model.md.
 	f := args.Features
-	var finders []unit.ClueFinder
-	if f.Enabled(feature.SpecCase) {
-		finders = append(finders, spec.SpecFinder{Index: args.SpecIndex})
-	}
-	if f.Enabled(feature.Rule) {
-		finders = append(finders, spec.RuleFinder{Index: args.SpecIndex})
-	}
-	if f.Enabled(feature.Link) {
-		finders = append(finders, spec.LinkFinder{Index: args.SpecIndex})
+	finders := []unit.ClueFinder{
+		spec.NewRelatedFinder(args.SpecIndex, args.RepoDir, spec.SelfGates{
+			Spec: f.Enabled(feature.SpecCase),
+			Rule: f.Enabled(feature.Rule),
+			Link: f.Enabled(feature.Link),
+		}),
 	}
 	if f.Enabled(feature.History) {
 		finders = append(finders, history.Finder{Index: args.HistoryIndex})
 	}
-	// ReferenceFinder (referenced-type rules) is always on — it honors an authored
-	// usage rule when the diff uses that type, a correctness signal not worth
-	// gating; it's cheap (diff scan + map lookup, no LLM/grep). See docs/spec-aware-review.md.
-	finders = append(finders, spec.NewReferenceFinder(args.SpecIndex, args.RepoDir))
-	// DepDocFinder surfaces a referenced type's docstring (incl. dependency source)
-	// — adoption-free contract context, no markers needed. Cheap (a few file reads).
-	finders = append(finders, spec.DepDocFinder{RepoDir: args.RepoDir})
-	// OwnerFinder surfaces the enclosing type's markers when a *method* changes —
-	// so a class-level @rule fires on method edits (else it never would). Cheap
-	// (symbol-id derivation + Index lookup). Always on. See docs/context-model.md.
-	finders = append(finders, spec.OwnerFinder{Index: args.SpecIndex, RepoDir: args.RepoDir})
 	var costlyFinders []unit.ClueFinder
 	if f.Enabled(feature.CallerCallee) {
 		costlyFinders = append(costlyFinders,

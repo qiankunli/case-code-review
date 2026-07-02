@@ -12,8 +12,8 @@ import (
 // yields an empty index — a dependency's spec must never fail a review.
 //
 // Dependency entries keep their own (dependency-relative) symbol-id keys and carry
-// fqn. ReferenceFinder matches them by the referenced name (and, later, by fqn), so
-// a diff that uses a dependency's type picks up that type's rule.
+// fqn. The used relation matches them by import-resolved fqn (or bare name), so a
+// diff that uses a dependency's type picks up that type's rule.
 func loadDepSpecs(repoDir string) Index {
 	out := Index{}
 	for _, p := range append(goDepSpecPaths(repoDir), pyDepSpecPaths(repoDir)...) {
