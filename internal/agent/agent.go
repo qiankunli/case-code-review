@@ -201,14 +201,16 @@ func New(args Args) *Agent {
 		finders = append(finders, history.Finder{Index: args.HistoryIndex})
 	}
 	var costlyFinders []unit.ClueFinder
-	// The walk's traversal is itself spec-driven (it stops at spec-bearing
-	// neighbors), so caller/callee needs the spec kind besides the cost gate; the
-	// neighbor-docstring rider follows the walk and honors the doc kind gate. It
-	// resolves callers/callees inside this repo, so it takes the local index.
-	if f.Enabled(feature.CallerCallee) && kinds.Spec {
+	// caller/callee sit behind the cost gate (call-graph grep) and emit per the
+	// kind gates: inherited/depended-on specs when the spec kind is on and a spec
+	// index exists, direct neighbors' docstrings when the doc kind is on. The two
+	// payloads are peer marks (authored vs derived) — doc needs no spec.json, so a
+	// repo that never adopted spec-case still gets caller/callee context.
+	// Resolution is intra-repo, hence the local index.
+	if f.Enabled(feature.CallerCallee) && (kinds.Spec || kinds.Doc) {
 		costlyFinders = append(costlyFinders,
-			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Doc: kinds.Doc},
-			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Doc: kinds.Doc},
+			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Kinds: kinds},
+			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Kinds: kinds},
 		)
 	}
 	a := &Agent{

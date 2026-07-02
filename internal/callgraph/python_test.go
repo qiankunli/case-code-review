@@ -28,7 +28,7 @@ func TestCalleeFinder_Python(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := unit.UnitOf(unit.Fragment{Path: "svc.py", Symbols: []string{"svc.py::Svc.create"}})
-	clues := CalleeFinder{RepoDir: repo, Index: idx}.Find(u)
+	clues := CalleeFinder{RepoDir: repo, Index: idx, Kinds: spec.KindGates{Spec: true}}.Find(u)
 	if len(clues) != 1 || clues[0].Kind != unit.ClueSpec || clues[0].Relation != unit.RelCallee ||
 		clues[0].Ref != "validate.py::validate" || !strings.Contains(clues[0].Text, "rejects an empty tenant") {
 		t.Fatalf("want validate callee clue, got %+v", clues)
@@ -43,7 +43,7 @@ func TestCalleeFinder_PythonDocstring(t *testing.T) {
 		"validate.py": "def validate(req):\n    \"\"\"Rejects an empty tenant.\"\"\"\n    return None\n",
 	})
 	u := unit.UnitOf(unit.Fragment{Path: "svc.py", Symbols: []string{"svc.py::Svc.create"}})
-	clues := CalleeFinder{RepoDir: repo, Index: spec.Index{}, Doc: true}.Find(u)
+	clues := CalleeFinder{RepoDir: repo, Kinds: spec.KindGates{Doc: true}}.Find(u)
 	if len(clues) != 1 || clues[0].Kind != unit.ClueDoc || clues[0].Relation != unit.RelCallee ||
 		clues[0].Ref != "validate.py::validate" || !strings.Contains(clues[0].Text, "Rejects an empty tenant") {
 		t.Fatalf("want callee docstring clue, got %+v", clues)
@@ -62,7 +62,7 @@ func TestCallerFinder_Python(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := unit.UnitOf(unit.Fragment{Path: "helper.py", Symbols: []string{"helper.py::helper"}})
-	clues := CallerFinder{RepoDir: repo, Index: idx}.Find(u)
+	clues := CallerFinder{RepoDir: repo, Index: idx, Kinds: spec.KindGates{Spec: true}}.Find(u)
 	if len(clues) != 1 || clues[0].Kind != unit.ClueSpec || clues[0].Relation != unit.RelCaller ||
 		clues[0].Ref != "entry.py::handle" {
 		t.Fatalf("want inherited handle spec, got %+v", clues)
