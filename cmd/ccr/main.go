@@ -56,6 +56,10 @@ func dispatch() error {
 		return runRules(args[1:])
 	case "viewer":
 		return runViewer(args[1:])
+	case "stats":
+		return runStats(args[1:])
+	case "export":
+		return runExport(args[1:])
 	case "-h", "--help":
 		printTopLevelUsage()
 		return nil
@@ -77,6 +81,8 @@ Commands:
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
+  stats        Analyze session transcripts (latency, tools, slow chains)
+  export       Export session transcripts as ATIF trajectories
   version      Show version information
 
 Examples:
