@@ -6,14 +6,13 @@ import (
 	"github.com/qiankunli/case-code-review/internal/feature"
 )
 
-// New should assemble clue finders per the feature gates: the four cheap finders
-// (spec/rule/link/history) and the two costly ones (caller/callee) when on;
-// disabled clue kinds drop their finder entirely.
+// New should assemble clue finders per the feature gates: the RelatedFinder
+// (self/owner/used; self kinds gated inside it — see spec.SelfGates tests) plus
+// history when on, and the two costly ones (caller/callee) when on.
 func TestNew_ClueGatesControlFinderAssembly(t *testing.T) {
-	// cheap finders = 4 gated (spec/rule/link/history) + 3 always-on (reference, depdoc, owner).
 	full := New(Args{}) // nil Features → all gates on
-	if len(full.finders) != 7 {
-		t.Errorf("all-on: want 7 cheap finders (spec/rule/link/history + reference + depdoc + owner), got %d", len(full.finders))
+	if len(full.finders) != 2 {
+		t.Errorf("all-on: want 2 cheap finders (related + history), got %d", len(full.finders))
 	}
 	if len(full.costlyFinders) != 2 {
 		t.Errorf("all-on: want 2 costly finders (caller/callee), got %d", len(full.costlyFinders))
@@ -21,7 +20,7 @@ func TestNew_ClueGatesControlFinderAssembly(t *testing.T) {
 
 	off, err := feature.Resolve(map[feature.Gate]bool{
 		feature.CallerCallee: false,
-		feature.SpecCase:     false,
+		feature.History:      false,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +29,7 @@ func TestNew_ClueGatesControlFinderAssembly(t *testing.T) {
 	if len(a.costlyFinders) != 0 {
 		t.Errorf("caller_callee off: want 0 costly finders, got %d", len(a.costlyFinders))
 	}
-	if len(a.finders) != 6 { // rule, link, history (gated) + reference + depdoc + owner (always-on)
-		t.Errorf("spec_case off: want 6 cheap finders, got %d", len(a.finders))
+	if len(a.finders) != 1 { // related only (history gated off)
+		t.Errorf("history off: want 1 cheap finder, got %d", len(a.finders))
 	}
 }
