@@ -21,7 +21,8 @@ type CalleeFinder struct {
 	Index   spec.Index
 	Runner  *gitcmd.Runner
 	Max     int
-	Depth   int // hops to walk down (0 -> default 2)
+	Depth   int  // hops to walk down (0 -> default 2)
+	Doc     bool // also emit direct callees' docstrings (the doc kind gate)
 }
 
 func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
@@ -32,7 +33,11 @@ func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
 	if max <= 0 {
 		max = defaultMaxResults
 	}
-	return walkForSpecs(f.Index, u.AllSymbols(), f.callees, f.Depth, max, f.RepoDir, unit.RelCallee, "callee", func(id string) unit.Clue {
+	var doc *docRider
+	if f.Doc {
+		doc = &docRider{repoDir: f.RepoDir, relation: unit.RelCallee, label: "callee"}
+	}
+	return walkForSpecs(f.Index, u.AllSymbols(), f.callees, f.Depth, max, doc, func(id string) unit.Clue {
 		return unit.Clue{
 			Kind:     unit.ClueSpec,
 			Relation: unit.RelCallee,
