@@ -33,13 +33,21 @@ func TestNew_ClueGatesControlFinderAssembly(t *testing.T) {
 		t.Errorf("history off: want 1 cheap finder, got %d", len(a.finders))
 	}
 
-	// The walk's traversal is spec-driven, so the spec kind gate also drops
-	// caller/callee even with the cost gate on.
+	// caller/callee emit two peer payloads (spec / doc): with spec off but doc on
+	// they still assemble (doc-only, depth-1 neighbor docstrings — no spec.json
+	// needed); with both kinds off there is nothing to emit, so they drop.
 	noSpec, err := feature.Resolve(map[feature.Gate]bool{feature.SpecCase: false})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b := New(Args{Features: noSpec}); len(b.costlyFinders) != 0 {
-		t.Errorf("spec_case off: want 0 costly finders (walk is spec-driven), got %d", len(b.costlyFinders))
+	if b := New(Args{Features: noSpec}); len(b.costlyFinders) != 2 {
+		t.Errorf("spec_case off, doc on: want 2 costly finders (doc-only mode), got %d", len(b.costlyFinders))
+	}
+	neither, err := feature.Resolve(map[feature.Gate]bool{feature.SpecCase: false, feature.Doc: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := New(Args{Features: neither}); len(c.costlyFinders) != 0 {
+		t.Errorf("spec+doc off: want 0 costly finders, got %d", len(c.costlyFinders))
 	}
 }

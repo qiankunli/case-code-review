@@ -35,7 +35,7 @@ func TestCallerFinder_InheritsSpecFromCaller(t *testing.T) {
 
 	// helper has no spec of its own -> walk up to its caller Handle (which does).
 	u := unit.UnitOf(unit.Fragment{Path: "helper.go", Symbols: []string{"helper.go::helper"}})
-	clues := CallerFinder{RepoDir: repo, Index: idx}.Find(u)
+	clues := CallerFinder{RepoDir: repo, Index: idx, Kinds: spec.KindGates{Spec: true}}.Find(u)
 
 	if len(clues) != 1 {
 		t.Fatalf("want 1 inherited caller clue, got %d: %+v", len(clues), clues)
@@ -66,7 +66,7 @@ func TestCallerFinder_ScopesUnexportedToPackage(t *testing.T) {
 	}
 
 	u := unit.UnitOf(unit.Fragment{Path: "a/helper.go", Symbols: []string{"a/helper.go::helper"}})
-	clues := CallerFinder{RepoDir: repo, Index: idx}.Find(u)
+	clues := CallerFinder{RepoDir: repo, Index: idx, Kinds: spec.KindGates{Spec: true}}.Find(u)
 
 	if len(clues) != 1 {
 		t.Fatalf("want exactly 1 same-package caller clue, got %d: %+v", len(clues), clues)
@@ -103,7 +103,7 @@ func TestCallerFinder_OwnSpecShortCircuits(t *testing.T) {
 	idx, _ := spec.Parse([]byte(`{"helper.go::helper": {"spec": "own contract"}}`))
 	// Own spec present -> no walk at all (no repo needed).
 	u := unit.UnitOf(unit.Fragment{Path: "helper.go", Symbols: []string{"helper.go::helper"}})
-	if clues := (CallerFinder{RepoDir: t.TempDir(), Index: idx}).Find(u); clues != nil {
+	if clues := (CallerFinder{RepoDir: t.TempDir(), Index: idx, Kinds: spec.KindGates{Spec: true}}).Find(u); clues != nil {
 		t.Errorf("own spec should short-circuit, got %+v", clues)
 	}
 }
@@ -117,7 +117,7 @@ func TestCallerFinder_Degrades(t *testing.T) {
 	// file-scope unit has no function to walk from
 	idx, _ := spec.Parse([]byte(`{"x.go::Caller": {"spec": "s"}}`))
 	file := unit.UnitOf(unit.Fragment{Path: "a.go"})
-	if got := (CallerFinder{RepoDir: t.TempDir(), Index: idx}).Find(file); got != nil {
+	if got := (CallerFinder{RepoDir: t.TempDir(), Index: idx, Kinds: spec.KindGates{Spec: true}}).Find(file); got != nil {
 		t.Errorf("file-scope unit should degrade to nil, got %+v", got)
 	}
 }
@@ -169,12 +169,12 @@ func TestCallerFinder_Depth2(t *testing.T) {
 	u := unit.UnitOf(unit.Fragment{Path: "f.go", Symbols: []string{"f.go::deepHelper"}})
 
 	// depth 2 walks deepHelper <- mid <- Entry and inherits Entry's spec.
-	clues := CallerFinder{RepoDir: repo, Index: idx, Depth: 2}.Find(u)
+	clues := CallerFinder{RepoDir: repo, Index: idx, Depth: 2, Kinds: spec.KindGates{Spec: true}}.Find(u)
 	if len(clues) != 1 || clues[0].Ref != "h.go::Entry" {
 		t.Fatalf("depth 2 should inherit Entry's spec, got %+v", clues)
 	}
 	// depth 1 stops at mid (no spec of its own) — nothing to inherit.
-	if got := (CallerFinder{RepoDir: repo, Index: idx, Depth: 1}).Find(u); got != nil {
+	if got := (CallerFinder{RepoDir: repo, Index: idx, Depth: 1, Kinds: spec.KindGates{Spec: true}}).Find(u); got != nil {
 		t.Errorf("depth 1 should find nothing (mid has no spec), got %+v", got)
 	}
 }
