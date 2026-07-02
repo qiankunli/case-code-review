@@ -763,37 +763,52 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	}
 
 	rawMsgs := a.args.Template.MainTask.Messages
-	messages := make([]llm.Message, 0, len(rawMsgs))
-	for _, m := range rawMsgs {
-		content := m.Content
-		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
-		content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
-		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
-		content = strings.ReplaceAll(content, "{{diff}}", u.Diff())
-		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
-		content = strings.ReplaceAll(content, "{{spec_cases}}", specCases)
-		// Curated see-also pointers; the reviewer fetches content on demand.
-		content = strings.ReplaceAll(content, "{{see_also}}", seeAlso)
-		// A previous review's findings on this unit, to reconcile against the change.
-		content = strings.ReplaceAll(content, "{{prior_findings}}", priorFindings)
-		// Always substitute the {{plan_guidance}} token so the literal placeholder
-		// never leaks into the rendered prompt. When the plan phase produced no
-		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
-		// (any language variant) so the LLM does not see a dangling section header.
-		// Strip MUST run before ReplaceAll: the regex requires the literal
-		// {{plan_guidance}} token to be present; if we replace first, the token
-		// is gone and the wrapper can't be matched.
-		if planResult == "" {
-			content = stripEmptyPlanBlock(content)
+	buildMessages := func(unitSource string) []llm.Message {
+		messages := make([]llm.Message, 0, len(rawMsgs))
+		for _, m := range rawMsgs {
+			content := m.Content
+			content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
+			content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
+			content = strings.ReplaceAll(content, "{{system_rule}}", rule)
+			content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
+			content = strings.ReplaceAll(content, "{{diff}}", u.Diff())
+			// The unit's post-change source, inlined so round 1 isn't spent fetching it.
+			content = strings.ReplaceAll(content, "{{unit_source}}", unitSource)
+			content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
+			content = strings.ReplaceAll(content, "{{spec_cases}}", specCases)
+			// Curated see-also pointers; the reviewer fetches content on demand.
+			content = strings.ReplaceAll(content, "{{see_also}}", seeAlso)
+			// A previous review's findings on this unit, to reconcile against the change.
+			content = strings.ReplaceAll(content, "{{prior_findings}}", priorFindings)
+			// Always substitute the {{plan_guidance}} token so the literal placeholder
+			// never leaks into the rendered prompt. When the plan phase produced no
+			// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
+			// (any language variant) so the LLM does not see a dangling section header.
+			// Strip MUST run before ReplaceAll: the regex requires the literal
+			// {{plan_guidance}} token to be present; if we replace first, the token
+			// is gone and the wrapper can't be matched.
+			if planResult == "" {
+				content = stripEmptyPlanBlock(content)
+			}
+			content = strings.ReplaceAll(content, "{{plan_guidance}}", planResult)
+			messages = append(messages, llm.NewTextMessage(m.Role, content))
 		}
-		content = strings.ReplaceAll(content, "{{plan_guidance}}", planResult)
-		messages = append(messages, llm.NewTextMessage(m.Role, content))
+		return messages
+	}
+
+	unitSource := a.buildUnitSource(ctx, u.Paths())
+	messages := buildMessages(unitSource)
+	maxAllowed := a.args.Template.MaxTokens
+	tokenLimit := maxAllowed * 4 / 5 // 80% of MaxTokens
+	if unitSource != sourceNotPreloaded && llmloop.CountMessagesTokens(messages) > tokenLimit {
+		// The preload is an optimization, never the reason a unit gets skipped by the
+		// token guard below — drop it and let the reviewer fetch on demand via
+		// file_read before giving up on the unit.
+		unitSource = sourceNotPreloaded
+		messages = buildMessages(unitSource)
 	}
 
 	tokenCount := llmloop.CountMessagesTokens(messages)
-	maxAllowed := a.args.Template.MaxTokens
-	tokenLimit := maxAllowed * 4 / 5 // 80% of MaxTokens
 	if tokenCount > tokenLimit {
 		msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d)", tokenCount, 80, maxAllowed)
 		fmt.Fprintf(stdout.Writer(), "[ccr] WARNING: %s for %s\n", msg, newPath)
@@ -809,6 +824,65 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	// (runReviewFilters), so sibling Units of the same file don't filter each
 	// other's comments against the wrong diff slice.
 	return a.runner.RunPerFile(ctx, messages, sc)
+}
+
+// preloadSourceBudget caps the total bytes of unit source inlined into the prompt.
+// Sized so typical units fit whole while a giant file can't crowd the prompt toward
+// the token guard (which would skip the unit's review outright).
+const preloadSourceBudget = 32 * 1024
+
+// sourceNotPreloaded fills {{unit_source}} when nothing was inlined, so the literal
+// placeholder never leaks and the reviewer knows to fetch on demand.
+const sourceNotPreloaded = "(not preloaded — fetch what you need via file_read)"
+
+// buildUnitSource inlines the post-change source of the unit's file(s) for
+// {{unit_source}} — session traces show round 1 is otherwise always "file_read the
+// whole reviewed file": a full LLM round paid to fetch content ccr already has.
+// Reads go through the file_read tool's own FileReader (mode-aware: workspace reads
+// disk, range/commit read `git show <ref>:`) and mirror its numbered-line format,
+// so inlined source and tool output look identical to the model. A file over the
+// remaining budget is named but not inlined (ranged file_read still works); an
+// unreadable path (deleted file) is skipped.
+func (a *Agent) buildUnitSource(ctx context.Context, paths []string) string {
+	fr := a.fileReader()
+	if fr == nil {
+		return sourceNotPreloaded
+	}
+	var b strings.Builder
+	budget := preloadSourceBudget
+	for _, p := range paths {
+		content, err := fr.Read(ctx, p)
+		if err != nil {
+			continue
+		}
+		if len(content) > budget {
+			fmt.Fprintf(&b, "File: %s — %d bytes exceeds the preload budget; read on demand via file_read\n\n", p, len(content))
+			continue
+		}
+		budget -= len(content)
+		lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+		fmt.Fprintf(&b, "File: %s (Total lines: %d)\n", p, len(lines))
+		for i, line := range lines {
+			fmt.Fprintf(&b, "%d|%s\n", i+1, line)
+		}
+		b.WriteString("\n")
+	}
+	out := strings.TrimRight(b.String(), "\n")
+	if out == "" {
+		return sourceNotPreloaded
+	}
+	return out
+}
+
+// fileReader unwraps the file_read tool's FileReader so the preload reads exactly
+// what the tool would return (same path resolution, same review-mode ref).
+func (a *Agent) fileReader() *tool.FileReader {
+	if p, ok := a.args.Tools.Get(tool.FileRead.Name()); ok {
+		if frp, ok := p.(*tool.FileReadProvider); ok {
+			return frp.FileReader
+		}
+	}
+	return nil
 }
 
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
