@@ -18,15 +18,19 @@ import (
 // callees' contracts. Go-only; bounded by Max/Depth, degrading to nil.
 type CalleeFinder struct {
 	RepoDir string
-	Index   spec.Index
+	Index   spec.Index // may be nil: doc-only mode still works
 	Runner  *gitcmd.Runner
 	Max     int
-	Depth   int  // hops to walk down (0 -> default 2)
-	Doc     bool // also emit direct callees' docstrings (the doc kind gate)
+	Depth   int            // hops to walk down (0 -> default 2)
+	Kinds   spec.KindGates // Spec: emit depended-on specs; Doc: emit direct callees' docstrings
 }
 
 func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
-	if f.Index == nil || f.RepoDir == "" || u.Scope != unit.ScopeFunc {
+	if f.RepoDir == "" || u.Scope != unit.ScopeFunc {
+		return nil
+	}
+	emitSpec := f.Kinds.Spec && f.Index != nil
+	if !emitSpec && !f.Kinds.Doc {
 		return nil
 	}
 	max := f.Max
@@ -34,10 +38,11 @@ func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
 		max = defaultMaxResults
 	}
 	var doc *docRider
-	if f.Doc {
+	if f.Kinds.Doc {
 		doc = &docRider{repoDir: f.RepoDir, relation: unit.RelCallee}
 	}
-	return walkForSpecs(f.Index, u.AllSymbols(), f.callees, f.Depth, max, doc, func(id string) unit.Clue {
+	cfg := walkCfg{idx: f.Index, depth: f.Depth, max: max, spec: emitSpec, doc: doc}
+	return walkNeighbors(cfg, u.AllSymbols(), f.callees, func(id string) unit.Clue {
 		return unit.Clue{
 			Kind:     unit.ClueSpec,
 			Relation: unit.RelCallee,

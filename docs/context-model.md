@@ -46,7 +46,7 @@ diff ─Splitter→ Fragment ─Merger(callchain + file)→ Unit
 
 4. **静态注入 vs loop tool 的界**：一步定界、高信号的进**静态 clue**（owner、直接一跳 used/callee 的 marks+doc、caller 上溯到的 spec）——关键契约不能指望模型自觉去查；开放式探索（走 N 层 caller、扫兄弟 func、深挖类型全貌）留 **loop tool**。判据：能一步定界进静态，要"探索"留 tool。
 
-5. **门禁 = kind 轴 × 费边，与矩阵同坐标系**：kind gate（`spec_case`/`rule`/`link`/`doc`）把一种证据在**所有关系**上一起开关——消融单元 = 观测矩阵的 kind 轴，关掉 `spec_case` 测的是"没有 spec 注入的 ccr"，不是"没有 self-spec 的 ccr"。`caller_callee` 是**费边**（grep 成本）门，与 kind 正交；但 walk 的遍历本身以 spec 为停止条件，所以 caller/callee 需要 spec kind 同时开（邻居 docstring 是 walk 的搭车项，随 doc kind）。关系本身不设门：关系是廉价机制，kind 才是证据。
+5. **门禁 = kind 轴 × 费边，与矩阵同坐标系**：kind gate（`spec_case`/`rule`/`link`/`doc`）把一种证据在**所有关系**上一起开关——消融单元 = 观测矩阵的 kind 轴，关掉 `spec_case` 测的是"没有 spec 注入的 ccr"，不是"没有 self-spec 的 ccr"。`caller_callee` 是**费边**（grep 成本）门，与 kind 正交：walk 有两种**对等 payload**、各随其 kind 门——spec（authored、稀疏 → "走到最近带 spec 的邻居"有终止意义，深度 2）与 doc（derived、稠密 → 只取**直接邻居**，多走即噪声）。所以没有 spec.json 的仓照样有 caller/callee 上下文（doc-only、一跳）——不对称是**密度差**，不是主次。关系本身不设门：关系是廉价机制，kind 才是证据。
 
 6. **跨仓 = spec 随包发（Model A）+ 读依赖源码 doc，两个地址空间不混装**：依赖把自己的 `spec.json`（entry 带 fqn）打进包，ccr 审消费仓时发现（Go 按 go.mod requires 查 `GOMODCACHE`，Python 扫 venv site-packages）。发现结果**只以 fqn 为键**放进 Catalog 的依赖空间，与本仓的 symbol-id 空间分开——依赖的 relpath 属于它自己的仓，混进本仓 key 空间会让依赖 entry 冒充本仓符号的 spec、也会让裸名匹配跨仓误中。所以：依赖符号**只经 import→fqn 可达**（无 fqn 的依赖 entry 丢弃）；同 fqn 冲突时本仓 entry 胜；docstring 直接读依赖源码（venv / 本仓）。
 

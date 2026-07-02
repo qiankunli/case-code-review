@@ -20,7 +20,7 @@ func TestCalleeFinder_DependsOnCalleeSpec(t *testing.T) {
 	}
 
 	u := unit.UnitOf(unit.Fragment{Path: "svc.go", Symbols: []string{"svc.go::Svc.Create"}})
-	clues := CalleeFinder{RepoDir: repo, Index: idx}.Find(u)
+	clues := CalleeFinder{RepoDir: repo, Index: idx, Kinds: spec.KindGates{Spec: true}}.Find(u)
 
 	if len(clues) != 1 {
 		t.Fatalf("want 1 callee clue, got %d: %+v", len(clues), clues)
@@ -38,7 +38,7 @@ func TestCalleeFinder_Degrades(t *testing.T) {
 	}
 	idx, _ := spec.Parse([]byte(`{"x.go::v": {"spec": "s"}}`))
 	file := unit.UnitOf(unit.Fragment{Path: "a.go"})
-	if got := (CalleeFinder{RepoDir: t.TempDir(), Index: idx}).Find(file); got != nil {
+	if got := (CalleeFinder{RepoDir: t.TempDir(), Index: idx, Kinds: spec.KindGates{Spec: true}}).Find(file); got != nil {
 		t.Errorf("file-scope unit should degrade to nil, got %+v", got)
 	}
 }
