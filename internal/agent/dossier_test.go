@@ -9,8 +9,8 @@ import (
 func TestDedupClues(t *testing.T) {
 	in := unit.Dossier{
 		{Kind: unit.ClueSpec, Relation: unit.RelSelf, Text: "contract"},
-		{Kind: unit.ClueSpec, Relation: unit.RelSelf, Text: "contract"},   // exact dup → dropped
-		{Kind: unit.ClueSpec, Relation: unit.RelOwner, Text: "contract"},  // same text, diff relation → kept
+		{Kind: unit.ClueSpec, Relation: unit.RelSelf, Text: "contract"},  // exact dup → dropped
+		{Kind: unit.ClueSpec, Relation: unit.RelOwner, Text: "contract"}, // same text, diff relation → kept
 		{Kind: unit.ClueRule, Relation: unit.RelUsed, Text: "per-request"},
 	}
 	got := dedupClues(in)

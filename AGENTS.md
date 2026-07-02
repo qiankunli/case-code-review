@@ -17,7 +17,7 @@
 case-code-review/
 ├── cmd/ccr/        CLI 入口：review/scan/config/… 子命令；组装 Args、加载 spec.json
 └── internal/
-    ├── unit/       ★ 两类型两阶段：`Fragment`（原子，Splitter 产：Go go/ast、Python python3）→ Merger 归并成 `Unit`（评审作用域，WatermarkMerger）；context 抽象 Clue / ClueFinder（merge 后挂 `Unit.Clues`）。详见 `docs/unit-model.md`
+    ├── unit/       ★ 两类型两阶段：`Fragment`（原子，Splitter 产：Go go/ast、Python python3）→ Merger 归并成 `Unit`（评审作用域，WatermarkMerger）；context 抽象 Clue(kind×relation) / ClueFinder / Dossier（merge 后挂 `Unit.Dossier`，去重后喂 loop）。详见 `docs/unit-model.md` + `docs/context-model.md`
     ├── spec/       ★ 消费 spec.json：SpecFinder/RuleFinder/LinkFinder 把 spec/case/rule/link 找成 Clue（廉价 finder）
     ├── history/    ★ 消费 --history（上轮评审 findings，symbol-id keyed）：Finder 挂成 ClueHistory，渲染成"核验是否已修"的 prompt（廉价 finder；评审反馈闭环的消费侧）
     ├── callgraph/  ★ caller/callee 邻域上下文（昂贵 finder）：CallerFinder（上溯 governing spec）/ CalleeFinder（下探依赖契约），共享有界 walk（深度 2、每分支停在最近带 spec 的邻居），git grep + go/ast / python3，Go+Python
