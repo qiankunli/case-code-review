@@ -57,7 +57,7 @@ func TestDogfoodContextAssembly(t *testing.T) {
 			spec.NewRelatedFinder(spec.Catalog{Local: idx}, repo, spec.KindGates{Spec: true, Rule: true, Link: true, Doc: true}),
 		},
 		costlyFinders: []unit.ClueFinder{
-			callgraph.CallerFinder{RepoDir: repo, Index: idx},
+			callgraph.CallerFinder{RepoDir: repo, Index: idx, Kinds: spec.KindGates{Spec: true}},
 		},
 		diffs: []model.Diff{
 			{NewPath: "handler.go", NewFileContent: files["handler.go"], Insertions: 1, Deletions: 1,
