@@ -6,31 +6,118 @@
 
 A diff alone is too little to review well — it can't tell whether a change breaks the requirement it serves or the code that depends on it. ccr's two ideas:
 
-**1. Capture more context.** ccr locates the *functions* a diff changes, then gathers the context the diff doesn't carry:
+**1. Capture more context.** ccr locates the *functions* a diff changes, then gathers the context the diff doesn't carry — along typed relations, from two sources (see below).
 
-- the function's **caller / callee neighborhood** — who depends on it, what it relies on; and
-- the **spec / case / rule / link** the author attached to the function — its contract, scenarios, review criteria, and curated "see also".
-
-**2. Review per *unit*, with a merge step.** A *unit* is the scope of one review loop, and its granularity is a ladder: **function → class → file → module / directory**. From a diff ccr first collects the changed units (functions), then **merges** them — by a strategy — into the units that actually trigger loops, coarsening *up that ladder* as the change grows: a file's many changed functions become one file unit; a sweeping change becomes file- or even directory-level units. So focus is highest for small changes and cost stays bounded for big ones — one loop per merged unit.
+**2. Review per *unit*, with a merge step.** A *unit* is the scope of one review loop, and its granularity is a ladder: **function → class → file → module / directory**. From a diff ccr first collects the changed units (functions), then **merges** them — by a strategy — into the units that actually trigger loops, coarsening *up that ladder* as the change grows: functions changed together along a call chain become one cross-file unit; a sweeping change coalesces into file-level units. So focus is highest for small changes and cost stays bounded for big ones — one loop per merged unit.
 
 The payoff: ccr finds the bugs that need background — a change quietly breaking a caller's assumption, or violating an invariant the diff doesn't show — checklist-checked against the function's real contract. (Syntax stays lint's job.)
 
-## The four context dimensions
+## The context model: evidence kinds × relations
 
-Authored on the function, in the separate [`spec-case`](https://github.com/qiankunli/spec-case) project (Go markers / Python decorators):
+For each review unit, ccr assembles a dossier of *clues*. A clue is one piece of evidence of a **kind**, reached along a **relation** — two orthogonal axes (see `docs/context-model.md`):
 
-| dimension | answers |
+| kind | what it is | source |
+|---|---|---|
+| **spec** | the symbol's contract (what it must guarantee) | authored (`spec.json`) |
+| **case** | concrete scenarios to verify | authored |
+| **rule** | review criteria — what to watch for | authored |
+| **link** | curated "see also" — a doc or another function | authored |
+| **doc** | the symbol's docstring / doc comment | **derived from source** |
+
+| relation | the symbol it reaches |
 |---|---|
-| **spec** | the function's contract (what it must guarantee) |
-| **case** | concrete scenarios to verify |
-| **rule** | review criteria — what to watch for |
-| **link** | curated "see also" — a doc, or another function to keep consistent |
+| **self** | the changed symbol itself |
+| **owner** | its enclosing class/type (a method change surfaces the class's contract) |
+| **caller** | who uses it — walking up to the nearest authored spec (the governing contract) |
+| **callee** | what it relies on — direct dependencies' contracts |
+| **used** | a type/func the diff references (import-resolved, so same-named symbols disambiguate) |
 
-Context is kept **lean**: bounded, known-relevant context is injected up front; broader expansion (callers, callees, linked docs) is fetched on demand during review.
+Two properties worth knowing:
+
+- **`doc` needs zero adoption.** The authored kinds require [`spec-case`](https://github.com/qiankunli/spec-case) markers; `doc` is extracted from source at review time (Python docstrings, Go doc comments) — including from your *dependencies'* source. A repo that never heard of spec-case still gets contract context on every relation.
+- **Cross-repo by fqn.** Locally, symbols are addressed by `relpath::symbol`. A dependency ships its own `spec.json` inside the package (Go module cache / Python site-packages); its entries are matched **only** by fqn (`import.path.Symbol`), resolved through your imports — so a framework's "per-request only" rule fires when your diff uses that framework type.
+
+## How to Use
+
+### Install
+
+```bash
+git clone https://github.com/qiankunli/case-code-review && cd case-code-review
+make install        # builds and installs `ccr` into ~/.local/bin (re-signs on macOS)
+# or: go install github.com/qiankunli/case-code-review/cmd/ccr@latest
+```
+
+### Configure the LLM
+
+Config lives in `~/.casecodereview/config.json`. Interactive setup:
+
+```bash
+ccr config provider     # pick a built-in provider or add a custom one (url / protocol / api_key)
+ccr config model        # pick a model for the active provider
+ccr llm test            # verify connectivity
+```
+
+Non-interactive (CI / scripts):
+
+```bash
+ccr config set provider anthropic
+ccr config set providers.anthropic.api_key $ANTHROPIC_API_KEY
+ccr config set providers.anthropic.model claude-sonnet-4-6
+```
+
+Custom providers (private gateways, OpenAI-protocol endpoints) support `url`, `protocol`, `extra_body`, `extra_headers`, `timeout_sec`, and a `models` list — see `ccr config --help`.
+
+### Review
+
+```bash
+ccr review                              # workspace: staged + unstaged + untracked
+ccr review --from main --to my-branch  # branch vs base (merge-base mode)
+ccr review --commit abc123              # a single commit vs its parent
+ccr review --format json                # machine-readable output (CI, bots)
+ccr review --background "$(cat mr.md)"  # inject requirement/business context for precision
+ccr review --history prior.json         # prior findings, re-checked against the new diff
+```
+
+### Inspect before spending tokens
+
+Both are LLM-free:
+
+```bash
+ccr review --preview            # which files would be reviewed / excluded
+ccr review --dry-run            # + each unit's fully assembled context (what the LLM would see)
+ccr review --dry-run --format json   # + structural metrics: unit/scope counts and the
+                                     #   clue_coverage matrix (relation/kind, e.g. owner/rule, callee/doc)
+```
+
+`--dry-run --format json` is the free A/B layer: diff two runs' metrics to see exactly what a feature or a spec.json adds, without an LLM call.
+
+### Feature gates (ablation)
+
+Every capability sits behind a named gate, all **on** by default. Turn one off to measure its marginal effect (leave-one-out):
+
+```bash
+ccr review --feature doc=off             # no derived docstring clues
+ccr review --feature caller_callee=off   # no call-graph walk
+ccr review --feature callchain=off       # no cross-file call-chain units
+```
+
+Kind gates (`spec_case` / `rule` / `link` / `doc`) switch an evidence kind across *all* relations; `caller_callee` is the cost gate for the call-graph walk. Also settable via `features:{}` in config or the `CCR_FEATURES` env. Run `ccr review --help` for the full list.
+
+### Authored contracts (optional, recommended)
+
+Mark functions/classes with [`spec-case`](https://github.com/qiankunli/spec-case) (Go doc-comment markers / Python decorators), generate `spec.json` with its `specgen`, and drop it at `.casecodereview/spec.json` — ccr auto-loads it (plus `~/.casecodereview/spec.json` and `--spec path`, highest wins). Dependencies' packaged `spec.json` files are discovered automatically and matched by fqn.
+
+### More
+
+```bash
+ccr scan                        # review whole files, no diff required (--path to narrow)
+ccr rules                       # inspect which review rules apply to which paths
+ccr viewer                      # WebUI: browse past review sessions, per-unit prompts and replies
+```
 
 ## Status
 
-Early WIP. Function-level splitting (Go + Python), the cost governor, and spec/case/rule/link injection are in; deeper context (walking callers up to the governing spec) is on the roadmap.
+Actively developed. In: function-level splitting (Go + Python), call-chain merge + cost governor, the full kind×relation context model above (authored + derived, local + dependency), feature gates, dry-run metrics, history reconciliation, session viewer.
 
 ## License
 
