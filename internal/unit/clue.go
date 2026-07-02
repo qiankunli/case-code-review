@@ -32,9 +32,11 @@ const (
 
 // Clue is one piece of review context reached for a Unit: a contract, a review
 // rule, a see-also pointer, a docstring, etc. Kind is what it is; Relation is how
-// it was reached; Text is the inline content; Ref is an optional pointer (a doc
-// path or symbol-id) to fetch on demand. Finding is separated from rendering: a
-// ClueFinder produces Clues, the review prompt renders them.
+// it was reached; Text is the RAW content (no relation wording — the prompt
+// renderer labels a clue from relation+kind+Ref, so dedup compares content and
+// label phrasing lives in one place); Ref is the source identity (a symbol-id,
+// fqn, or doc path), also used to fetch on demand. Finding is separated from
+// rendering: a ClueFinder produces Clues, the review prompt renders them.
 type Clue struct {
 	Kind     ClueKind
 	Relation Relation
