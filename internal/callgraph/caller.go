@@ -28,6 +28,7 @@ type CallerFinder struct {
 	Runner  *gitcmd.Runner // optional; falls back to exec when nil
 	Max     int            // cap on resolved spec-bearing callers (0 -> default)
 	Depth   int            // hops to walk up (0 -> default 2)
+	Doc     bool           // also emit direct callers' docstrings (the doc kind gate)
 }
 
 func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
@@ -47,7 +48,11 @@ func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
 	if max <= 0 {
 		max = defaultMaxResults
 	}
-	return walkForSpecs(f.Index, u.AllSymbols(), f.callers, f.Depth, max, f.RepoDir, unit.RelCaller, "caller", func(id string) unit.Clue {
+	var doc *docRider
+	if f.Doc {
+		doc = &docRider{repoDir: f.RepoDir, relation: unit.RelCaller, label: "caller"}
+	}
+	return walkForSpecs(f.Index, u.AllSymbols(), f.callers, f.Depth, max, doc, func(id string) unit.Clue {
 		return unit.Clue{
 			Kind:     unit.ClueSpec,
 			Relation: unit.RelCaller,

@@ -278,19 +278,21 @@ func (c usedCollector) goImportPaths(u unit.Unit) map[string]string {
 
 // --- the composed finder: relation axis × source axis ---
 
-// SelfGates mirrors the spec_case/rule/link feature gates for the self relation.
-// The owner/used relations are always on: cheap (file reads + map lookups) and
-// correctness signals (an authored usage rule / type contract must be honored).
-type SelfGates struct{ Spec, Rule, Link bool }
+// KindGates mirrors the spec_case/rule/link/doc feature gates. A gate switches
+// its clue KIND off across every relation (self/owner/used alike), so an
+// ablation run measures "ccr without that evidence kind" — the gate axis and the
+// dry-run relation×kind matrix share one coordinate system. Relations themselves
+// are not gated: they're the cheap mechanism, kinds are the evidence.
+type KindGates struct{ Spec, Rule, Link, Doc bool }
 
 // RelatedFinder is the unit.ClueFinder over the self/owner/used relations.
 type RelatedFinder struct {
 	local      Index // this repo's entries; dependency entries reach cluesFor via RelatedSymbol.Entry
-	gates      SelfGates
+	gates      KindGates
 	collectors []RelationCollector
 }
 
-func NewRelatedFinder(cat Catalog, repoDir string, gates SelfGates) RelatedFinder {
+func NewRelatedFinder(cat Catalog, repoDir string, gates KindGates) RelatedFinder {
 	return RelatedFinder{
 		local: cat.Local,
 		gates: gates,
@@ -338,21 +340,33 @@ func (f RelatedFinder) cluesFor(rs RelatedSymbol) []unit.Clue {
 			clues = append(clues, linkClues(e.Links, unit.RelSelf)...)
 		}
 	case unit.RelOwner:
-		if r := f.local.Render([]string{rs.ID}); r != "" {
-			clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelOwner, Text: r})
+		if f.gates.Spec {
+			if r := f.local.Render([]string{rs.ID}); r != "" {
+				clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelOwner, Text: r})
+			}
 		}
-		for _, r := range e.Rules {
-			clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelOwner, Text: "(enclosing type `" + rs.Name + "`) " + r})
+		if f.gates.Rule {
+			for _, r := range e.Rules {
+				clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelOwner, Text: "(enclosing type `" + rs.Name + "`) " + r})
+			}
 		}
-		clues = append(clues, linkClues(e.Links, unit.RelOwner)...)
+		if f.gates.Link {
+			clues = append(clues, linkClues(e.Links, unit.RelOwner)...)
+		}
 	case unit.RelUsed:
-		// used injects rules only: a spec/link of a merely-referenced symbol is
-		// noise, but its usage rule is a constraint on this change.
-		for _, r := range e.Rules {
-			clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelUsed, Text: "(used type `" + rs.Name + "`) " + r, Ref: rs.Name})
+		// used injects the referenced symbol's contract (spec) and usage rules —
+		// both are constraints on this change. Its cases/links stay out: another
+		// symbol's scenario checklist and see-alsos are noise here.
+		if f.gates.Spec && e.Spec != "" {
+			clues = append(clues, unit.Clue{Kind: unit.ClueSpec, Relation: unit.RelUsed, Text: "(used type `" + rs.Name + "`) " + e.Spec, Ref: rs.Name})
+		}
+		if f.gates.Rule {
+			for _, r := range e.Rules {
+				clues = append(clues, unit.Clue{Kind: unit.ClueRule, Relation: unit.RelUsed, Text: "(used type `" + rs.Name + "`) " + r, Ref: rs.Name})
+			}
 		}
 	}
-	if rs.DocFile != "" {
+	if f.gates.Doc && rs.DocFile != "" {
 		if doc := extractDocFromFile(rs.DocFile, rs.DocName); doc != "" {
 			label := "used type `" + rs.Ref + "`"
 			if rs.Relation == unit.RelOwner {

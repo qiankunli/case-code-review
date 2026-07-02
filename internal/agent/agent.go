@@ -184,28 +184,31 @@ func New(args Args) *Agent {
 		})
 	}
 	// Clue gates are applied here (finder assembly) rather than in findClues, so a
-	// disabled clue kind simply never fires. The self-relation kinds are gated;
-	// the owner/used relations are always on — cheap (file reads + map lookups)
-	// correctness signals (an authored usage rule / enclosing-type contract must be
-	// honored when the diff touches it). See docs/context-model.md.
+	// disabled clue kind simply never fires. Gates are two orthogonal axes: KIND
+	// gates (spec_case/rule/link/doc) switch an evidence kind off across every
+	// relation — the ablation unit matches the dry-run relation×kind matrix — and
+	// the caller_callee COST gate switches the expensive call-graph walk. Relations
+	// themselves are not gated (cheap mechanism). See docs/context-model.md.
 	f := args.Features
-	finders := []unit.ClueFinder{
-		spec.NewRelatedFinder(args.Specs, args.RepoDir, spec.SelfGates{
-			Spec: f.Enabled(feature.SpecCase),
-			Rule: f.Enabled(feature.Rule),
-			Link: f.Enabled(feature.Link),
-		}),
+	kinds := spec.KindGates{
+		Spec: f.Enabled(feature.SpecCase),
+		Rule: f.Enabled(feature.Rule),
+		Link: f.Enabled(feature.Link),
+		Doc:  f.Enabled(feature.Doc),
 	}
+	finders := []unit.ClueFinder{spec.NewRelatedFinder(args.Specs, args.RepoDir, kinds)}
 	if f.Enabled(feature.History) {
 		finders = append(finders, history.Finder{Index: args.HistoryIndex})
 	}
 	var costlyFinders []unit.ClueFinder
-	if f.Enabled(feature.CallerCallee) {
-		// The walk resolves callers/callees inside this repo, so it only ever sees
-		// local symbol-ids — it takes the local index, not the catalog.
+	// The walk's traversal is itself spec-driven (it stops at spec-bearing
+	// neighbors), so caller/callee needs the spec kind besides the cost gate; the
+	// neighbor-docstring rider follows the walk and honors the doc kind gate. It
+	// resolves callers/callees inside this repo, so it takes the local index.
+	if f.Enabled(feature.CallerCallee) && kinds.Spec {
 		costlyFinders = append(costlyFinders,
-			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner},
-			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner},
+			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Doc: kinds.Doc},
+			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Doc: kinds.Doc},
 		)
 	}
 	a := &Agent{
