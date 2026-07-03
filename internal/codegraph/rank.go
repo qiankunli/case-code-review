@@ -3,7 +3,6 @@ package codegraph
 import (
 	"math"
 	"sort"
-	"strings"
 )
 
 // Ranking = the aider repo-map kernel, reshaped for review: build a
@@ -29,7 +28,13 @@ type edge struct {
 }
 
 // Rank scores every definition by relevance to the seed files/idents.
-// Result is sorted best-first and deterministic.
+// Result is sorted best-first and deterministic; empty (len 0) means "no
+// cross-file signal" — callers should test len(), not nil.
+//
+// Seed files that contribute no defs/refs (pure-config or non-code files)
+// drop out of the personalization vector; if none survive, PageRank falls
+// back to uniform teleport — a deliberately silent degradation: the map is
+// then merely less focused, never wrong.
 func Rank(ex *Extraction, seedFiles, seedIdents []string) []RankedSymbol {
 	if ex == nil || len(ex.Defs) == 0 {
 		return nil
@@ -204,5 +209,5 @@ func IsLikelySymbolName(s string) bool {
 			return false
 		}
 	}
-	return !strings.ContainsAny(s, " \t")
+	return true
 }

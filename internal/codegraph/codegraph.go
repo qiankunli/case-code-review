@@ -10,29 +10,18 @@
 // carry a Confidence level and consumers filter to what they can stomach —
 // one graph, tiered consumption, instead of per-feature heuristics.
 //
-// The v1 extraction backend is a cheap go/ast scan producing name-paired
-// reference edges (ConfidenceLow). Typed backends (go/types-resolved calls)
-// can be added without touching consumers.
+// The v1 extraction backends are cheap syntax scans producing name-paired
+// reference edges — the lowest confidence tier, acceptable only for ranking.
+// Typed backends (go/types-resolved calls) will tag their edges with an
+// explicit confidence level when they land, together with the consumers
+// that filter on it; the type is deliberately NOT pre-declared here (dead
+// API drifts — see #74 review).
 package codegraph
 
 import (
 	"fmt"
 	"sort"
 	"strings"
-)
-
-// Confidence grades how much an edge can be trusted. See package comment:
-// consumers filter by the level their correctness budget allows.
-type Confidence int
-
-const (
-	// ConfidenceLow — name co-occurrence (an ident referenced here is defined
-	// there). Fine for ranking, never for scope/merge decisions.
-	ConfidenceLow Confidence = iota
-	// ConfidenceMedium — pattern-resolved (receiver/import narrowed) edges.
-	ConfidenceMedium
-	// ConfidenceHigh — type-checker-resolved edges (go/types, call graph).
-	ConfidenceHigh
 )
 
 // Def is one package-level definition extracted from a source file.

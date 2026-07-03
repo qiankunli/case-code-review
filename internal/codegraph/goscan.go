@@ -68,8 +68,13 @@ func ScanGo(repoDir string) *Extraction {
 }
 
 func scanGoFile(path, rel string, ex *Extraction) {
+	// Stat first: an oversized (generated/vendored) file should be skipped
+	// without paying its full read+allocation.
+	if fi, err := os.Stat(path); err != nil || fi.Size() > maxFileBytes {
+		return
+	}
 	src, err := os.ReadFile(path)
-	if err != nil || len(src) > maxFileBytes {
+	if err != nil {
 		return
 	}
 	fset := token.NewFileSet()
@@ -163,6 +168,8 @@ func receiverType(d *ast.FuncDecl) string {
 		case *ast.IndexExpr: // generic receiver T[P]
 			t = x.X
 		case *ast.IndexListExpr:
+			t = x.X
+		case *ast.ParenExpr: // rare but legal: func (t (MyType)) M()
 			t = x.X
 		case *ast.Ident:
 			return x.Name
