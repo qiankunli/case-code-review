@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -443,6 +444,21 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 		go func(u unit.Unit) {
 			defer wg.Done()
 			defer func() { <-sem }() // release
+			// A panic while reviewing one unit must be isolated exactly like an
+			// error return: counted in unitFailed and recorded as a unit_error
+			// warning, so other units still complete and the all-failed rollup
+			// below stays correct. Registered before the timeout-cancel defer,
+			// so cancel() still runs first on unwind and fileCtx is already
+			// cancelled here — use the parent ctx for telemetry.
+			defer func() {
+				if r := recover(); r != nil {
+					atomic.AddInt64(&a.unitFailed, 1)
+					fmt.Fprintf(stdout.Writer(), "[ccr] Unit review panic for %s: %v\n%s\n", u.ID, r, debug.Stack())
+					telemetry.ErrorEvent(ctx, "unit.panic", fmt.Errorf("panic: %v", r),
+						telemetry.AnyToAttr("file.path", u.Path()))
+					a.recordWarning("unit_error", u.Path(), fmt.Sprintf("panic: %v", r))
+				}
+			}()
 
 			var fileCtx context.Context
 			var cancel context.CancelFunc
@@ -531,6 +547,16 @@ func (a *Agent) runReviewFilters(ctx context.Context) {
 		go func(d model.Diff) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			// Same isolation as the unit-review goroutines: a panic while
+			// filtering one file must not crash the process; the file just
+			// keeps its unfiltered comments.
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(stdout.Writer(), "[ccr] Review filter panic for %s: %v\n%s\n", d.NewPath, r, debug.Stack())
+					telemetry.ErrorEvent(ctx, "review_filter.panic", fmt.Errorf("panic: %v", r),
+						telemetry.AnyToAttr("file.path", d.NewPath))
+				}
+			}()
 			a.executeReviewFilter(ctx, d)
 		}(a.diffs[i])
 	}
