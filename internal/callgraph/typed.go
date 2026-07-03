@@ -3,12 +3,12 @@ package callgraph
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/codegraph"
-	"github.com/qiankunli/case-code-review/internal/stdout"
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
@@ -38,11 +38,13 @@ func (t *TypedGraph) graph() *codegraph.CallGraph {
 		g, err := codegraph.BuildGoCallGraph(ctx, t.RepoDir)
 		if err != nil {
 			// Expected on non-building diffs / non-Go repos — informational.
-			fmt.Fprintf(stdout.Writer(), "[ccr] Typed call graph unavailable (%v) — using grep heuristics\n", err)
+			// Stderr, not stdout: the lazy build fires inside dry-run too,
+			// and --format json must stay machine-parseable.
+			fmt.Fprintf(os.Stderr, "[ccr] Typed call graph unavailable (%v) — using grep heuristics\n", err)
 			return
 		}
 		nodes, edges := g.Stats()
-		fmt.Fprintf(stdout.Writer(), "[ccr] Typed call graph: %d funcs, %d edges in %s\n",
+		fmt.Fprintf(os.Stderr, "[ccr] Typed call graph: %d funcs, %d edges in %s\n",
 			nodes, edges, time.Since(start).Round(time.Millisecond))
 		t.g = g
 	})
