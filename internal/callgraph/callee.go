@@ -20,6 +20,7 @@ type CalleeFinder struct {
 	RepoDir string
 	Index   spec.Index // may be nil: doc-only mode still works
 	Runner  *gitcmd.Runner
+	Typed   *TypedGraph // optional; typed answers for Go symbols, grep fallback otherwise
 	Max     int
 	Depth   int            // hops to walk down (0 -> default 2)
 	Kinds   spec.KindGates // Spec: emit depended-on specs; Doc: emit direct callees' docstrings
@@ -55,6 +56,9 @@ func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
 // callees returns the symbol-ids of functions that funcID calls — extract the
 // callees from its body (go/ast), then resolve each name to its definition.
 func (f CalleeFinder) callees(funcID string) []string {
+	if ids, ok := f.Typed.Callees(funcID); ok {
+		return ids
+	}
 	path, sym, ok := unit.SplitID(funcID)
 	if !ok {
 		return nil

@@ -166,6 +166,9 @@ type Agent struct {
 	// It exists to stop the reviewer from guessing symbol names in searches:
 	// it lists names that actually exist, ranked by relevance to the diff.
 	repoMap string
+	// typedGraph is the shared lazy handle to the typed Go call graph
+	// (nil when the typed_graph gate is off). See callgraph.TypedGraph.
+	typedGraph *callgraph.TypedGraph
 }
 
 // New creates a new Agent from the given arguments.
@@ -206,6 +209,13 @@ func New(args Args) *Agent {
 	if f.Enabled(feature.History) {
 		finders = append(finders, history.Finder{Index: args.HistoryIndex})
 	}
+	// One typed call graph per review, shared by clue finders and merge
+	// adjacency; lazily built on first Go neighbor query. Gate off -> nil
+	// handle -> every consumer stays on the grep heuristics.
+	var typed *callgraph.TypedGraph
+	if f.Enabled(feature.TypedGraph) {
+		typed = &callgraph.TypedGraph{RepoDir: args.RepoDir}
+	}
 	var costlyFinders []unit.ClueFinder
 	// caller/callee sit behind the cost gate (call-graph grep) and emit per the
 	// kind gates: inherited/depended-on specs when the spec kind is on and a spec
@@ -215,8 +225,8 @@ func New(args Args) *Agent {
 	// Resolution is intra-repo, hence the local index.
 	if f.Enabled(feature.CallerCallee) && (kinds.Spec || kinds.Doc) {
 		costlyFinders = append(costlyFinders,
-			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Kinds: kinds},
-			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Kinds: kinds},
+			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Kinds: kinds, Typed: typed},
+			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Kinds: kinds, Typed: typed},
 		)
 	}
 	a := &Agent{
@@ -230,6 +240,7 @@ func New(args Args) *Agent {
 		merger:        unit.WatermarkMerger{Watermark: defaultUnitWatermark},
 		finders:       finders,       // cheap spec.json / history clues, gated per kind
 		costlyFinders: costlyFinders, // call-graph caller/callee clues (gated + budget-gated)
+		typedGraph:    typed,
 	}
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
@@ -617,7 +628,7 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 	costly := total <= defaultUnitWatermark
 	var units []unit.Unit
 	if costly && a.features.Enabled(feature.CallChain) {
-		adj := callgraph.CallAdjacency(a.args.RepoDir, a.args.GitRunner, funcIDsOf(files))
+		adj := callgraph.CallAdjacency(a.args.RepoDir, a.args.GitRunner, a.typedGraph, funcIDsOf(files))
 		chains, residual := clusterByCallChain(files, adj)
 		units = append(units, chains...)
 		units = append(units, merger.Merge(residual)...)
