@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -943,5 +944,171 @@ func TestNewResolver_BraceExpansionInProjectRule(t *testing.T) {
 				t.Errorf("Resolve(%q) = %q, want containing %q", tt.path, truncate(got, 80), tt.want)
 			}
 		})
+	}
+}
+
+func TestLooksLikeFilePath(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"team-rules.md", true},
+		{"docs/review.txt", true},
+		{"RULES.MARKDOWN", true},
+		{"Follow rules from team.md", false}, // spaces → inline
+		{"line one\nline two.md", false},     // multi-line → inline
+		{"plain inline rule", false},
+		{"script.sh", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := looksLikeFilePath(tt.in); got != tt.want {
+			t.Errorf("looksLikeFilePath(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestRuleFileReference_ProjectRelativePath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	ccrDir := filepath.Join(dir, ".casecodereview")
+	if err := os.MkdirAll(ccrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "team-rules.md"), []byte("check tenancy isolation\n"), 0o644); err != nil {
+		t.Fatalf("write rule doc: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"team-rules.md"}]}`
+	if err := os.WriteFile(filepath.Join(ccrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if got := resolver.Resolve("internal/foo.go"); got != "check tenancy isolation" {
+		t.Errorf("Resolve = %q, want file content", got)
+	}
+}
+
+func TestRuleFileReference_InlineWithSpacesUntouched(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	ccrDir := filepath.Join(dir, ".casecodereview")
+	if err := os.MkdirAll(ccrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"Follow rules from team.md"}]}`
+	if err := os.WriteFile(filepath.Join(ccrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if got := resolver.Resolve("internal/foo.go"); got != "Follow rules from team.md" {
+		t.Errorf("Resolve = %q, want inline text untouched", got)
+	}
+}
+
+func TestRuleFileReference_MissingFileFallsBackToSystem(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	ccrDir := filepath.Join(dir, ".casecodereview")
+	if err := os.MkdirAll(ccrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"no-such-file.md"}]}`
+	if err := os.WriteFile(filepath.Join(ccrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+	// Cleared rule → empty entry is skipped → system default answers.
+	if detail := dr.ResolveDetail("internal/foo.go"); detail.Source != "system" {
+		t.Errorf("expected fallback to system rule, got source %q (rule %q)", detail.Source, truncate(detail.Rule, 60))
+	}
+}
+
+func TestRuleFileReference_PathEscapeRejected(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.md"), []byte("outside content"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	dir := t.TempDir()
+	ccrDir := filepath.Join(dir, ".casecodereview")
+	if err := os.MkdirAll(ccrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	rel, err := filepath.Rel(dir, filepath.Join(outside, "secret.md"))
+	if err != nil {
+		t.Fatalf("rel: %v", err)
+	}
+	ruleJSON := fmt.Sprintf(`{"rules":[{"path":"**/*.go","rule":%q}]}`, rel)
+	if err := os.WriteFile(filepath.Join(ccrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+	if detail := dr.ResolveDetail("internal/foo.go"); detail.Source != "system" {
+		t.Errorf("expected escape rejected + system fallback, got source %q (rule %q)", detail.Source, truncate(detail.Rule, 60))
+	}
+}
+
+func TestRuleFileReference_SizeCapEnforced(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	ccrDir := filepath.Join(dir, ".casecodereview")
+	if err := os.MkdirAll(ccrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	big := strings.Repeat("x", 512*1024+1)
+	if err := os.WriteFile(filepath.Join(dir, "big.md"), []byte(big), 0o644); err != nil {
+		t.Fatalf("write big rule doc: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"big.md"}]}`
+	if err := os.WriteFile(filepath.Join(ccrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+	if detail := dr.ResolveDetail("internal/foo.go"); detail.Source != "system" {
+		t.Errorf("expected size cap rejection + system fallback, got source %q", detail.Source)
+	}
+}
+
+func TestRuleFileReference_CustomRuleFileRelativeToItsDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ruleDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ruleDir, "custom-rules.txt"), []byte("custom content"), 0o644); err != nil {
+		t.Fatalf("write rule doc: %v", err)
+	}
+	customPath := filepath.Join(ruleDir, "rule.json")
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"custom-rules.txt"}]}`
+	if err := os.WriteFile(customPath, []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(t.TempDir(), customPath)
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if got := resolver.Resolve("internal/foo.go"); got != "custom content" {
+		t.Errorf("Resolve = %q, want custom file content", got)
 	}
 }
