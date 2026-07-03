@@ -74,3 +74,34 @@ func TestRunnerModelsUsed(t *testing.T) {
 		t.Error("ModelsUsed must return a copy, not the internal map")
 	}
 }
+
+func TestExecuteToolCall_CodeCommentKeepsScopeMemberPath(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector})
+
+	// A call-chain scope spans two files; a comment on the SECOND member
+	// must keep its path instead of being re-anchored to the first.
+	args, err := json.Marshal(map[string]any{
+		"path": "b.go",
+		"comments": []any{
+			map[string]any{"content": "issue", "existing_code": "foo"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp := r.executeToolCall(context.Background(), session.Scope{ID: "chain", Kind: "unit", Type: "callchain", Paths: []string{"a.go", "b.go"}}, llm.ToolCall{
+		Function: llm.FunctionCall{Name: "code_comment", Arguments: string(args)},
+	}, nil, "")
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("unexpected result: %+v", cp)
+	}
+	comments := collector.Comments()
+	if len(comments) != 1 || comments[0].Path != "b.go" {
+		t.Fatalf("member path must be kept, got %+v", comments)
+	}
+}
