@@ -46,7 +46,7 @@ func (a *Agent) buildRepoMap(units []unit.Unit) string {
 		}
 	}
 
-	ex := codegraph.ScanGo(a.args.RepoDir)
+	ex := codegraph.Scan(a.args.RepoDir)
 	codegraph.PairMethodIdents(ex)
 	m := codegraph.BuildMap(ex, codegraph.MapRequest{
 		SeedFiles:  seedFiles,
