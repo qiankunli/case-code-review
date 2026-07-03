@@ -1112,3 +1112,66 @@ func TestRuleFileReference_CustomRuleFileRelativeToItsDir(t *testing.T) {
 		t.Errorf("Resolve = %q, want custom file content", got)
 	}
 }
+
+func TestRuleFileReference_SymlinkEscapeRejected(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.md"), []byte("outside content"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	dir := t.TempDir()
+	ccrDir := filepath.Join(dir, ".casecodereview")
+	if err := os.MkdirAll(ccrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// In-repo path, but it is a symlink whose target lives outside the repo:
+	// the lexical prefix check passes, only the post-EvalSymlinks boundary
+	// check can catch it.
+	if err := os.Symlink(filepath.Join(outside, "secret.md"), filepath.Join(dir, "rules.md")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"rules.md"}]}`
+	if err := os.WriteFile(filepath.Join(ccrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+	detail := dr.ResolveDetail("internal/foo.go")
+	if detail.Source != "system" {
+		t.Errorf("expected symlink escape rejected + system fallback, got source %q (rule %q)", detail.Source, truncate(detail.Rule, 60))
+	}
+	if strings.Contains(detail.Rule, "outside content") {
+		t.Errorf("outside file content leaked into rule")
+	}
+}
+
+func TestRuleFileReference_InRepoSymlinkAllowed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	ccrDir := filepath.Join(dir, ".casecodereview")
+	if err := os.MkdirAll(ccrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "real-rules.md"), []byte("real content"), 0o644); err != nil {
+		t.Fatalf("write rule doc: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "real-rules.md"), filepath.Join(dir, "rules.md")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"rules.md"}]}`
+	if err := os.WriteFile(filepath.Join(ccrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if got := resolver.Resolve("internal/foo.go"); got != "real content" {
+		t.Errorf("Resolve = %q, want in-repo symlink target content", got)
+	}
+}

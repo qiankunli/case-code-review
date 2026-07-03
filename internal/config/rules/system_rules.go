@@ -5,11 +5,14 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
+
+	"github.com/qiankunli/case-code-review/internal/pathutil"
 )
 
 // Resolver resolves a review rule for a file path.
@@ -490,7 +493,10 @@ func tryReadRuleFile(rule string, repoDir string) *string {
 		}
 	}
 	if filepath.IsAbs(rule) {
-		content, err := readRuleFileSafe(rule)
+		// Absolute paths get no directory boundary check by design: rule.json
+		// is authored by the user running the review, so an absolute reference
+		// is treated as intentional and trusted.
+		content, err := readRuleFileSafe(rule, "")
 		if err == nil {
 			return &content
 		}
@@ -502,7 +508,10 @@ func tryReadRuleFile(rule string, repoDir string) *string {
 		return nil
 	}
 
-	// Relative path: resolve against repoDir, validate no traversal.
+	// Relative path: resolve against repoDir, validate no traversal. This
+	// lexical check is only the first gate — readRuleFileSafe re-validates the
+	// boundary after symlink resolution, so an in-repo symlink pointing outside
+	// repoDir is also rejected.
 	resolved := filepath.Clean(filepath.Join(repoDir, rule))
 	cleanRepo := filepath.Clean(repoDir)
 	if !strings.HasPrefix(resolved, cleanRepo+string(os.PathSeparator)) {
@@ -510,7 +519,7 @@ func tryReadRuleFile(rule string, repoDir string) *string {
 		return nil
 	}
 
-	content, err := readRuleFileSafe(resolved)
+	content, err := readRuleFileSafe(resolved, cleanRepo)
 	if err == nil {
 		return &content
 	}
@@ -522,14 +531,32 @@ func tryReadRuleFile(rule string, repoDir string) *string {
 	return nil
 }
 
-// readRuleFileSafe reads and validates a rule file. It enforces extension whitelist
-// (.md / .txt / .markdown), a 512 KB size cap, and resolves symlinks before checking
-// the path — the extension is re-checked on the resolved target so a whitelisted
-// symlink cannot smuggle in an arbitrary file. Returns the trimmed content on success.
-func readRuleFileSafe(path string) (string, error) {
+// readRuleFileSafe reads and validates a rule file. It resolves symlinks first,
+// then validates everything against the resolved target: extension whitelist
+// (.md / .txt / .markdown), and — when baseDir is non-empty — that the target
+// still lives under baseDir, so a whitelisted in-repo symlink cannot smuggle in
+// a file from outside. The size cap (512 KB) is checked on the opened file
+// descriptor and the read itself is bounded, so a file swapped between stat and
+// read cannot exceed the cap (TOCTOU). Returns the trimmed content on success.
+func readRuleFileSafe(path, baseDir string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", err
+	}
+
+	if baseDir != "" {
+		// Compare in resolved space: baseDir itself may sit behind a symlink
+		// (e.g. macOS /tmp → /private/tmp), which would falsely fail a
+		// resolved-vs-unresolved comparison.
+		resolvedBase, err := filepath.EvalSymlinks(baseDir)
+		if err != nil {
+			return "", err
+		}
+		if !pathutil.WithinBase(resolvedBase, resolved) {
+			// Report the resolved base — it is what the check actually compared
+			// against, and may differ from baseDir (e.g. macOS /tmp → /private/tmp).
+			return "", fmt.Errorf("resolved path %s escapes %s", resolved, resolvedBase)
+		}
 	}
 
 	if !allowedRuleExts[strings.ToLower(filepath.Ext(resolved))] {
@@ -537,7 +564,13 @@ func readRuleFileSafe(path string) (string, error) {
 	}
 
 	const maxSize = 512 * 1024
-	info, err := os.Stat(resolved)
+	f, err := os.Open(resolved)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
 	if err != nil {
 		return "", err
 	}
@@ -545,9 +578,12 @@ func readRuleFileSafe(path string) (string, error) {
 		return "", fmt.Errorf("file too large (%d bytes, max %d)", info.Size(), maxSize)
 	}
 
-	content, err := os.ReadFile(resolved)
+	content, err := io.ReadAll(io.LimitReader(f, maxSize+1))
 	if err != nil {
 		return "", err
+	}
+	if len(content) > maxSize {
+		return "", fmt.Errorf("file too large (>%d bytes, max %d)", maxSize, maxSize)
 	}
 
 	return strings.TrimRight(string(content), "\n"), nil
