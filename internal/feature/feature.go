@@ -27,6 +27,7 @@ const (
 	ReviewFilter Gate = "review_filter" // file-level pass dropping provably-wrong comments
 	Relocation   Gate = "relocation"    // LLM re-location of comments to the right line
 	Routing      Gate = "routing"       // multi-model round-robin pool; off = single model (deterministic)
+	RepoMap      Gate = "repo_map"      // ranked symbol map injected per run (anti guessed-name searches)
 )
 
 // def is a gate's registry entry: default state + one-line description.
@@ -50,6 +51,7 @@ var registry = map[Gate]def{
 	ReviewFilter: {true, "file-level pass dropping provably-wrong comments"},
 	Relocation:   {true, "LLM re-location of comments to the right line"},
 	Routing:      {true, "multi-model round-robin pool; off = single model (deterministic)"},
+	RepoMap:      {true, "ranked symbol map injected per run (anti guessed-name searches)"},
 }
 
 // Set is a resolved gate configuration. nil is valid and means "all defaults".

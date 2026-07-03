@@ -34,6 +34,10 @@ References the author flagged as relevant when changing these function(s) — co
 Findings a previous review raised on these function(s). For each, check whether the current code now addresses it: if fixed, note it briefly; if still present, re-raise it; do not re-flag what is already resolved. If empty, there is no prior review to reconcile.
 {{prior_findings}}
 
+### Repo Symbol Map (Optional)
+Symbols that actually exist in this repository, ranked by relevance to this change. When searching or reading other code, use these exact names — do not invent or guess identifier names; if a name you expected is not listed, search a fragment of it rather than the full guess. If empty, no map was built.
+{{repo_map}}
+
 ### Review Checklist
 {{system_rule}}
 
