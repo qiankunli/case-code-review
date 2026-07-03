@@ -71,6 +71,14 @@
 - 漏报实锤：跨文件 build-breaker（builder 版本 vs go.mod）连续两单漏过；大 PR 的锁窗口竞态；unauthenticated 端点新增信息暴露。
 - 结论倾向：precision 可用但非零误报（2/19，其一是 §4.4 型）；主要短板在大 PR 召回与跨文件一致性——优先投上下文（spec/link/caller 图与跨 unit 汇总面），而不是调 prompt。
 
+### 6. 首轮治理复测（2026-07-03，同日）
+
+针对基线病灶的第一轮治理（search-suggest #73 / repo_map #74-76 / 截断 wrap-up #77 / typed graph #81）后，重跑基线最差三单（#6/#11/#17）：
+
+- **空搜索 32/53（60%）→ 0/25**；code_search 次数减半，总 tool call 降 1/3，prompt token 净降 10%。suggestion 一次未触发——L1 在源头消灭了瞎猜，L0 退化为保险网（预期分工）。
+- typed graph 的 dry-run A/B（零 LLM）：`Shell.Run` 邻域 grep 模式 8 个符号 5 个错（同名撞车+测试函数），typed 模式精确 3 个——契约上溯基线从碰运气变权威。
+- 方法论验证：**基线（量化病灶）→ 治理 → 同工作负载复测**，单日闭环；n=1 的波动性 caveat 记录在案。
+
 ## References
 
 - ATIF 导出：`ccr export --format atif <session.jsonl>`（session 落盘位置见 `internal/session/`）
