@@ -18,6 +18,25 @@ import (
 	"github.com/qiankunli/case-code-review/internal/tool"
 )
 
+const (
+	// wrapUpTimeReserve: when less than this remains on the ctx deadline,
+	// stop investigating and force a verdict. Sized to fit wrapUpMaxRounds
+	// typical LLM rounds — smaller and the wrap-up itself gets cut off.
+	wrapUpTimeReserve = 90 * time.Second
+	// wrapUpRoundReserve: force the verdict when this many tool rounds
+	// remain (counting the current one), so round-budget exhaustion ends in
+	// an explicit task_done instead of a silent partial.
+	wrapUpRoundReserve = 2
+	// wrapUpMaxRounds caps the rounds granted once a deadline wrap-up is
+	// issued: what's left of the budget goes to concluding, not digging.
+	wrapUpMaxRounds = 2
+)
+
+// wrapUpPrompt forces an explicit verdict when a budget is nearly gone. It
+// must demand task_done: chains ending without it are recorded as
+// unit_incomplete and their silence must not read as a clean review.
+const wrapUpPrompt = "BUDGET NEARLY EXHAUSTED — stop investigating now. Based only on the evidence you already gathered: call code_comment for each issue you are confident about, then call task_done. If you found no issues in what you managed to review, call task_done and state explicitly which parts you reviewed. Do not call any other tools."
+
 // Deps bundles all per-call dependencies the Runner needs. Both
 // internal/agent (diff review) and internal/scan (full-file scan) build a
 // Deps from their own state and hand it to NewRunner.
@@ -177,17 +196,47 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 // tool calls returned by the model, and collects review comments until
 // task_done is called or limits are reached. Token usage and warnings
 // are aggregated on the Runner across all files.
+//
+// Truncation discipline: a chain that ends WITHOUT task_done is a partial
+// verdict, and silence would read as "clean" downstream (measured on real
+// trajectories: the timed-out chains were exactly the big-PR blind spots).
+// Two guards enforce an explicit ending: a wrap-up turn is injected when the
+// time or round budget is nearly exhausted (forcing a verdict while there is
+// still budget to say it), and any chain that still ends without task_done
+// records a unit_incomplete warning instead of returning silently.
 func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc session.Scope) error {
 	newPath := sc.Path() // representative path for logging / code_comment anchoring
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
+	wrapUpIssued := false
+	completed := false
+	truncateReason := ""
 
 	for toolReqCount > 0 {
 		select {
 		case <-ctx.Done():
+			r.RecordWarning("unit_incomplete", newPath,
+				"review ended without task_done (deadline exceeded); verdict is partial — do not read as clean")
 			return ctx.Err()
 		default:
+		}
+
+		if !wrapUpIssued {
+			if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wrapUpTimeReserve {
+				wrapUpIssued = true
+				// Cap the remaining rounds: the point of wrap-up is to spend
+				// what's left of the deadline on a verdict, not on more digging.
+				if toolReqCount > wrapUpMaxRounds {
+					toolReqCount = wrapUpMaxRounds
+				}
+				messages = append(messages, llm.NewTextMessage("user", wrapUpPrompt))
+				fmt.Fprintf(stdout.Writer(), "[ccr] Budget nearly exhausted for %s — forcing wrap-up (deadline)\n", newPath)
+			} else if toolReqCount == wrapUpRoundReserve {
+				wrapUpIssued = true
+				messages = append(messages, llm.NewTextMessage("user", wrapUpPrompt))
+				fmt.Fprintf(stdout.Writer(), "[ccr] Budget nearly exhausted for %s — forcing wrap-up (rounds)\n", newPath)
+			}
 		}
 
 		toolReqCount--
@@ -262,12 +311,14 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc sess
 		}
 
 		if taskCompleted {
+			completed = true
 			break
 		}
 		if !hasValidResult {
 			consecutiveEmptyRounds++
 			if consecutiveEmptyRounds >= maxConsecutiveEmptyRounds {
 				fmt.Fprintf(stdout.Writer(), "[ccr] Too many empty retries for %s, stopping.\n", newPath)
+				truncateReason = "consecutive empty tool rounds"
 				break
 			}
 			fmt.Fprintf(stdout.Writer(), "[ccr] No valid tool results for %s, retrying...\n", newPath)
@@ -278,12 +329,18 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc sess
 		succeed := r.addNextMessage(ctx, content, calls, results, &messages, sc)
 		if !succeed {
 			fmt.Fprintf(stdout.Writer(), "[ccr] Context compression exceeded threshold for %s, stopping.\n", newPath)
+			truncateReason = "context compression limit"
 			break
 		}
 	}
 
-	if toolReqCount <= 0 {
-		fmt.Fprintf(stdout.Writer(), "[ccr] Max tool requests reached for %s.\n", newPath)
+	if !completed {
+		if truncateReason == "" {
+			truncateReason = "tool-round budget exhausted"
+			fmt.Fprintf(stdout.Writer(), "[ccr] Max tool requests reached for %s.\n", newPath)
+		}
+		r.RecordWarning("unit_incomplete", newPath,
+			"review ended without task_done ("+truncateReason+"); verdict is partial — do not read as clean")
 	}
 	return nil
 }
