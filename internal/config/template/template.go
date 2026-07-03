@@ -19,6 +19,10 @@ type Template struct {
 	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask      *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	// ConsistencyTask is the session-level cross-file contradiction sweep —
+	// one agentic loop over the whole diff after per-unit reviews (a defect
+	// that lives BETWEEN two files belongs to no single unit's scope).
+	ConsistencyTask *LlmConversation `json:"CONSISTENCY_TASK,omitempty"`
 }
 
 // ScanTemplate holds the full-file scan task template configuration loaded
@@ -67,6 +71,7 @@ type templateManifest struct {
 	PlanModeLineThreshold int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
 	ReLocationTask        *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask      *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	ConsistencyTask       *manifestConversation `json:"CONSISTENCY_TASK,omitempty"`
 }
 
 func resolveConversation(m manifestConversation) (LlmConversation, error) {
@@ -125,6 +130,9 @@ func LoadDefault() (*Template, error) {
 		return nil, err
 	}
 	if tpl.ReviewFilterTask, err = resolveOptionalConversation(m.ReviewFilterTask, "REVIEW_FILTER_TASK"); err != nil {
+		return nil, err
+	}
+	if tpl.ConsistencyTask, err = resolveOptionalConversation(m.ConsistencyTask, "CONSISTENCY_TASK"); err != nil {
 		return nil, err
 	}
 	return &tpl, nil

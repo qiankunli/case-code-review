@@ -28,6 +28,7 @@ const (
 	Relocation   Gate = "relocation"    // LLM re-location of comments to the right line
 	Routing      Gate = "routing"       // multi-model round-robin pool; off = single model (deterministic)
 	RepoMap      Gate = "repo_map"      // ranked symbol map injected per run (anti guessed-name searches)
+	Consistency  Gate = "consistency"   // session-level cross-file contradiction sweep after unit reviews
 )
 
 // def is a gate's registry entry: default state + one-line description.
@@ -52,6 +53,7 @@ var registry = map[Gate]def{
 	Relocation:   {true, "LLM re-location of comments to the right line"},
 	Routing:      {true, "multi-model round-robin pool; off = single model (deterministic)"},
 	RepoMap:      {true, "ranked symbol map injected per run (anti guessed-name searches)"},
+	Consistency:  {true, "session-level cross-file contradiction sweep after unit reviews"},
 }
 
 // Set is a resolved gate configuration. nil is valid and means "all defaults".

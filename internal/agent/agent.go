@@ -516,6 +516,13 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 		a.runReviewFilters(ctx)
 	}
 
+	// Cross-file contradiction sweep — after the filter on purpose (the
+	// filter judges against single-file hunks and would kill findings whose
+	// evidence lives in another file). See internal/agent/consistency.go.
+	if a.features.Enabled(feature.Consistency) {
+		a.runConsistencyPass(ctx)
+	}
+
 	comments := a.args.CommentCollector.Comments()
 	a.tagSymbolIDs(comments)
 	return comments, nil

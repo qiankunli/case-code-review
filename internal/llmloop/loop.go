@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -374,10 +375,15 @@ func (r *Runner) executeToolCall(ctx context.Context, sc session.Scope, call llm
 		return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
 	}
 
-	// Always inject the current file path for code_comment.
-	// The model sometimes hallucinates a path, so we override it.
+	// Snap code_comment's path back into the scope when the model hallucinated
+	// one — but keep any path that IS a scope member: multi-file scopes
+	// (call-chain units, the consistency pass) legitimately comment on members
+	// beyond the representative first path, and re-anchoring those would pin
+	// findings to the wrong file.
 	if t == tool.CodeComment && newPath != "" {
-		args["path"] = newPath
+		if p, _ := args["path"].(string); p == "" || !slices.Contains(sc.Paths, p) {
+			args["path"] = newPath
+		}
 	}
 
 	startTime := time.Now()

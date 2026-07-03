@@ -27,6 +27,13 @@
       { "role": "user", "prompt_file": "review_filter_task_user.md" }
     ]
   },
+  "CONSISTENCY_TASK": {
+    "timeout": 300,
+    "messages": [
+      { "role": "system", "prompt_file": "consistency_task_system.md" },
+      { "role": "user", "prompt_file": "consistency_task_user.md" }
+    ]
+  },
   "RE_LOCATION_TASK": {
     "timeout": 180,
     "messages": [
