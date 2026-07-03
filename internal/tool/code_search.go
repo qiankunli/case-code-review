@@ -138,7 +138,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		}
 		if outStr == "" {
 			if errStr == "" {
-				return "No matches found", nil
+				return p.noMatchesWithSuggestions(ctx, searchText, usePerlRegexp, pathspec), nil
 			}
 			return fmt.Sprintf("Error: %s", strings.TrimSpace(errStr)), nil
 		}
