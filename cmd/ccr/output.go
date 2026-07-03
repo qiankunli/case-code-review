@@ -322,13 +322,14 @@ type dryRunJSON struct {
 	Preview  *agent.DiffPreview  `json:"preview"`
 	Metrics  dryRunMetrics       `json:"metrics"`
 	Units    []agent.UnitContext `json:"units"`
+	RepoMap  string              `json:"repo_map,omitempty"` // run-level ranked symbol map (shared by all units)
 }
 
 // outputDryRunJSON emits the dry-run as JSON: the resolved feature gates, the file
 // preview, a structural metrics summary, and each unit's assembled context.
 // Deterministic (no LLM), so it's the free layer for A/B-comparing what a feature
 // changes — and it records which gates were active.
-func outputDryRunJSON(preview *agent.DiffPreview, units []agent.UnitContext, features map[string]bool) error {
+func outputDryRunJSON(preview *agent.DiffPreview, units []agent.UnitContext, repoMap string, features map[string]bool) error {
 	m := dryRunMetrics{
 		UnitCount:    len(units),
 		ScopeCounts:  map[string]int{},
@@ -348,7 +349,7 @@ func outputDryRunJSON(preview *agent.DiffPreview, units []agent.UnitContext, fea
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(dryRunJSON{Features: features, Preview: preview, Metrics: m, Units: units})
+	return enc.Encode(dryRunJSON{Features: features, Preview: preview, Metrics: m, Units: units, RepoMap: repoMap})
 }
 
 func dryRunSection(title, body string) {
