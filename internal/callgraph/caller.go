@@ -28,6 +28,7 @@ type CallerFinder struct {
 	RepoDir string
 	Index   spec.Index     // may be nil: doc-only mode still works
 	Runner  *gitcmd.Runner // optional; falls back to exec when nil
+	Typed   *TypedGraph    // optional; typed answers for Go symbols, grep fallback otherwise
 	Max     int            // cap on resolved spec-bearing callers (0 -> default)
 	Depth   int            // hops to walk up (0 -> default 2)
 	Kinds   spec.KindGates // Spec: emit inherited specs; Doc: emit direct callers' docstrings
@@ -77,6 +78,11 @@ func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
 // callers returns the symbol-ids of functions that call funcID — git grep the
 // function's name, then resolve each call site to its enclosing function.
 func (f CallerFinder) callers(funcID string) []string {
+	// Typed graph first: resolved edges beat name matching (a common method
+	// name greps half the repo; the type checker knows the one true caller set).
+	if ids, ok := f.Typed.Callers(funcID); ok {
+		return ids
+	}
 	name := funcName(funcID)
 	if name == "" {
 		return nil

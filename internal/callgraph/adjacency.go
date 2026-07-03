@@ -14,12 +14,12 @@ import "github.com/qiankunli/case-code-review/internal/gitcmd"
 // so the caller gates it (only when the change stays function-grained). Languages
 // with no callee extraction (e.g. Python today) yield no edges — those functions
 // simply stay unclustered.
-func CallAdjacency(repoDir string, runner *gitcmd.Runner, funcIDs []string) map[string][]string {
+func CallAdjacency(repoDir string, runner *gitcmd.Runner, typed *TypedGraph, funcIDs []string) map[string][]string {
 	set := make(map[string]bool, len(funcIDs))
 	for _, id := range funcIDs {
 		set[id] = true
 	}
-	cf := CalleeFinder{RepoDir: repoDir, Runner: runner} // Index unused by callees()
+	cf := CalleeFinder{RepoDir: repoDir, Runner: runner, Typed: typed} // Index unused by callees()
 	adj := map[string][]string{}
 	seen := map[[2]string]bool{}
 	addEdge := func(a, b string) {
