@@ -553,7 +553,9 @@ func readRuleFileSafe(path, baseDir string) (string, error) {
 			return "", err
 		}
 		if !pathutil.WithinBase(resolvedBase, resolved) {
-			return "", fmt.Errorf("resolved path %s escapes %s", resolved, baseDir)
+			// Report the resolved base — it is what the check actually compared
+			// against, and may differ from baseDir (e.g. macOS /tmp → /private/tmp).
+			return "", fmt.Errorf("resolved path %s escapes %s", resolved, resolvedBase)
 		}
 	}
 
