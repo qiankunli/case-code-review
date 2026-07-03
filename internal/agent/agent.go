@@ -161,6 +161,11 @@ type Agent struct {
 	// and dispatchUnits (plan / review_filter). Clue gates are applied at finder
 	// assembly in New(), so findClues stays gate-agnostic.
 	features feature.Set
+	// repoMap is the run-level ranked symbol map (computed once in
+	// dispatchUnits, shared by every unit's prompt — like background/rule).
+	// It exists to stop the reviewer from guessing symbol names in searches:
+	// it lists names that actually exist, ranked by relevance to the diff.
+	repoMap string
 }
 
 // New creates a new Agent from the given arguments.
@@ -423,6 +428,13 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 	units, err := a.splitUnits()
 	if err != nil {
 		return nil, err
+	}
+
+	if a.features.Enabled(feature.RepoMap) {
+		a.repoMap = a.buildRepoMap(units)
+		if a.repoMap != "" {
+			fmt.Fprintf(stdout.Writer(), "[ccr] Repo map built (~%d tokens) — injected into every unit\n", len(a.repoMap)/4)
+		}
 	}
 
 	var wg sync.WaitGroup
@@ -804,6 +816,8 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 			content = strings.ReplaceAll(content, "{{spec_cases}}", specCases)
 			// Curated see-also pointers; the reviewer fetches content on demand.
 			content = strings.ReplaceAll(content, "{{see_also}}", seeAlso)
+			// Run-level ranked symbol map (real names, anti-guessing).
+			content = strings.ReplaceAll(content, "{{repo_map}}", a.repoMap)
 			// A previous review's findings on this unit, to reconcile against the change.
 			content = strings.ReplaceAll(content, "{{prior_findings}}", priorFindings)
 			// Always substitute the {{plan_guidance}} token so the literal placeholder

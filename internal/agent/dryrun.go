@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/qiankunli/case-code-review/internal/feature"
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
@@ -39,16 +40,21 @@ func countClues(clues unit.Dossier) map[string]int {
 // DryRun loads diffs once and returns the complete no-LLM view behind
 // `ccr review --dry-run`: the file-selection preview (which files are reviewed /
 // excluded — the `--preview` subset) plus each review unit's assembled context
-// (spec/case/rule/link + caller/callee). So both file filtering and spec.json /
-// call-graph coverage can be inspected in one pass, for free.
-func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, error) {
+// (spec/case/rule/link + caller/callee) and the run-level repo map. So file
+// filtering, spec.json / call-graph coverage and map injection can all be
+// inspected in one pass, for free.
+func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, string, error) {
 	if err := a.loadDiffs(ctx); err != nil {
-		return nil, nil, fmt.Errorf("load diffs: %w", err)
+		return nil, nil, "", fmt.Errorf("load diffs: %w", err)
 	}
 	preview := a.buildPreview()
 	units, err := a.splitUnits()
 	if err != nil {
-		return nil, nil, fmt.Errorf("split units: %w", err)
+		return nil, nil, "", fmt.Errorf("split units: %w", err)
+	}
+	repoMap := ""
+	if a.features.Enabled(feature.RepoMap) {
+		repoMap = a.buildRepoMap(units)
 	}
 
 	out := make([]UnitContext, 0, len(units))
@@ -75,5 +81,5 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, error)
 			Prior:     prior,
 		})
 	}
-	return preview, out, nil
+	return preview, out, repoMap, nil
 }
