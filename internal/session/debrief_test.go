@@ -104,3 +104,41 @@ func TestWriteDebrief(t *testing.T) {
 		t.Fatalf("diff stats off: %v", end)
 	}
 }
+
+func TestWriteFindings(t *testing.T) {
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{GitHead: "abc123def456"})
+	sh.WriteFindings([]Finding{
+		{Path: "a.go", StartLine: 3, EndLine: 5, SymbolID: "a.go::F", Fingerprint: "0123456789ab", Alias: "m1", Content: "off-by-one"},
+		{Path: "b.go", StartLine: 9, EndLine: 9, Fingerprint: "ba9876543210", Content: "nil deref"},
+	})
+	sh.Finalize()
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var start map[string]any
+	var findings []map[string]any
+	for _, r := range records {
+		switch r["type"] {
+		case "session_start":
+			start = r
+		case "finding":
+			findings = append(findings, r)
+		}
+	}
+	// The posterior tier walks forward from the manifest's git_head anchor.
+	if start["git_head"] != "abc123def456" {
+		t.Fatalf("git_head missing from manifest: %v", start)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("want 2 finding records, got %d", len(findings))
+	}
+	f := findings[0]
+	if f["path"] != "a.go" || f["symbol_id"] != "a.go::F" || f["fingerprint"] != "0123456789ab" ||
+		f["start_line"].(float64) != 3 || f["content"] != "off-by-one" || f["alias"] != "m1" {
+		t.Fatalf("finding record off: %v", f)
+	}
+	// Optional fields are omitted, not empty-stringed.
+	if _, ok := findings[1]["symbol_id"]; ok {
+		t.Fatalf("empty symbol_id must be omitted: %v", findings[1])
+	}
+}

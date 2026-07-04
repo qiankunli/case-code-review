@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -206,6 +208,7 @@ func New(args Args) *Agent {
 				"unit_watermark":       defaultUnitWatermark,
 				"preload_budget_bytes": preloadSourceBudget,
 			},
+			GitHead: detectGitHead(context.Background(), args.RepoDir),
 		})
 	}
 	// Clue gates are applied here (finder assembly) rather than in findClues, so a
@@ -547,7 +550,39 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 
 	comments := a.args.CommentCollector.Comments()
 	a.tagSymbolIDs(comments)
+	tagFingerprints(comments)
+	a.persistFindings(comments)
 	return comments, nil
+}
+
+// tagFingerprints stamps each comment's stable identity: sha256(path\0content),
+// 12 hex chars. Lines are deliberately excluded — relocation and later edits
+// shift them, and the fingerprint's job is joining human labels and posterior
+// evidence to "the same finding" across re-runs.
+func tagFingerprints(comments []model.LlmComment) {
+	for i := range comments {
+		h := sha256.Sum256([]byte(comments[i].Path + "\x00" + comments[i].Content))
+		comments[i].Fingerprint = hex.EncodeToString(h[:])[:12]
+	}
+}
+
+// persistFindings writes the run's delivered (post-filter) findings into the
+// session transcript, so eval reads one store — the raw code_comment tool
+// calls recorded earlier are pre-filter and overcount.
+func (a *Agent) persistFindings(comments []model.LlmComment) {
+	findings := make([]session.Finding, 0, len(comments))
+	for _, c := range comments {
+		findings = append(findings, session.Finding{
+			Path:        c.Path,
+			StartLine:   c.StartLine,
+			EndLine:     c.EndLine,
+			SymbolID:    c.SymbolID,
+			Fingerprint: c.Fingerprint,
+			Alias:       c.Alias,
+			Content:     c.Content,
+		})
+	}
+	a.session.WriteFindings(findings)
 }
 
 // tagSymbolIDs resolves each comment's enclosing symbol-id (<relpath>::<symbol>)
