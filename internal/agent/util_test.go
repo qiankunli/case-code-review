@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/qiankunli/case-code-review/internal/llm"
+	"github.com/qiankunli/case-code-review/internal/model"
 	"github.com/qiankunli/case-code-review/internal/session"
 )
 
@@ -194,5 +195,24 @@ func TestReviewModeString(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("reviewModeString(%q, %q, %q) = %q, want %q", tt.from, tt.to, tt.commit, got, tt.want)
 		}
+	}
+}
+
+func TestTagFingerprints(t *testing.T) {
+	a := []model.LlmComment{
+		{Path: "a.go", StartLine: 3, Content: "nil deref"},
+		{Path: "a.go", StartLine: 99, Content: "nil deref"}, // same finding, relocated
+		{Path: "b.go", StartLine: 3, Content: "nil deref"},  // same words, different file
+	}
+	tagFingerprints(a)
+	if len(a[0].Fingerprint) != 12 {
+		t.Fatalf("fingerprint length = %d, want 12", len(a[0].Fingerprint))
+	}
+	// Identity is path+content: line drift must not change it, path must.
+	if a[0].Fingerprint != a[1].Fingerprint {
+		t.Errorf("line shift changed fingerprint: %s vs %s", a[0].Fingerprint, a[1].Fingerprint)
+	}
+	if a[0].Fingerprint == a[2].Fingerprint {
+		t.Errorf("different path must change fingerprint")
 	}
 }

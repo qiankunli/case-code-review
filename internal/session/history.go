@@ -152,6 +152,38 @@ type SessionOptions struct {
 	// Params are the run's governing knobs (unit watermark, preload budget…) —
 	// the confounders a metric trend must be conditioned on.
 	Params map[string]any
+	// GitHead is the repo's HEAD sha at review time — the anchor posterior
+	// scans walk forward from.
+	GitHead string
+}
+
+// Finding is a final (post-filter) review comment persisted into the
+// transcript, so the session file alone carries everything the posterior
+// accuracy tier joins on: the fingerprint keys human labels, the symbol-id +
+// lines key "did a later commit touch this" scans (with the manifest's
+// git_head as the anchor). Raw code_comment tool calls in llm_response
+// records are pre-filter and don't reflect what the review delivered.
+type Finding struct {
+	Path        string
+	StartLine   int
+	EndLine     int
+	SymbolID    string
+	Fingerprint string
+	Alias       string
+	Content     string
+}
+
+// WriteFindings persists the run's delivered findings, one "finding" record each.
+func (sh *SessionHistory) WriteFindings(findings []Finding) {
+	sh.mu.Lock()
+	p := sh.persist
+	sh.mu.Unlock()
+	if p == nil {
+		return
+	}
+	for _, f := range findings {
+		p.WriteFinding(f)
+	}
 }
 
 // New creates a new SessionHistory with the given repo directory.

@@ -110,3 +110,19 @@ func detectGitBranch(ctx context.Context, repoDir string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// detectGitHead returns the repo's HEAD sha — the manifest's anchor for
+// posterior scans ("did a later commit touch what a finding flagged"), which
+// need to know exactly which state the review looked at. In workspace mode
+// it's the base the dirty tree sits on; diffFrom/diffTo already pin the
+// range/commit modes.
+func detectGitHead(ctx context.Context, repoDir string) string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "rev-parse", "HEAD")
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
