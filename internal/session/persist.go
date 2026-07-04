@@ -189,6 +189,9 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	if len(jw.opts.Params) > 0 {
 		rec["params"] = jw.opts.Params
 	}
+	if jw.opts.GitHead != "" {
+		rec["git_head"] = jw.opts.GitHead
+	}
 	if tag := os.Getenv(evalTagEnv); tag != "" {
 		rec["eval_tag"] = tag
 	}
@@ -358,6 +361,35 @@ func (jw *jsonlWriter) WriteDebrief(ss *ScopeSession, d Debrief) string {
 		rec["tool_calls"] = d.ToolCalls
 	}
 	addScopeFields(rec, ss)
+	jw.writeRecordLocked(rec)
+	jw.lastUUID = uuid
+	return uuid
+}
+
+// WriteFinding writes one delivered finding as a "finding" record (see Finding).
+func (jw *jsonlWriter) WriteFinding(f Finding) string {
+	uuid := generateUUID()
+
+	jw.mu.Lock()
+	defer jw.mu.Unlock()
+	rec := map[string]any{
+		"uuid":        uuid,
+		"parentUuid":  jw.lastUUID,
+		"type":        "finding",
+		"sessionId":   jw.sessionID,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		"path":        f.Path,
+		"start_line":  f.StartLine,
+		"end_line":    f.EndLine,
+		"fingerprint": f.Fingerprint,
+		"content":     f.Content,
+	}
+	if f.SymbolID != "" {
+		rec["symbol_id"] = f.SymbolID
+	}
+	if f.Alias != "" {
+		rec["alias"] = f.Alias
+	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid
