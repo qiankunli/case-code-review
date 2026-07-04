@@ -22,6 +22,34 @@ func FuncIDAt(path, src string, line int) (string, bool) {
 	}
 }
 
+// SymbolSpan returns the 1-indexed inclusive line range of a symbol-id's
+// definition in src, dispatching by file extension (.go via go/ast, .py via
+// python3). The briefing uses it to inline just a function's body when the
+// whole file can't be (over budget, or a neighbor where only one function
+// matters). Returns (0, 0, false) for unsupported languages, parse failures,
+// or a symbol not defined in src.
+func SymbolSpan(path, src, symbolID string) (start, end int, ok bool) {
+	var spans []funcSpan
+	var err error
+	switch {
+	case strings.HasSuffix(path, ".go"):
+		spans, err = parseGoFuncs(path, src)
+	case strings.HasSuffix(path, ".py"):
+		spans, err = parsePyFuncs(path, src)
+	default:
+		return 0, 0, false
+	}
+	if err != nil {
+		return 0, 0, false
+	}
+	for _, s := range spans {
+		if s.id == symbolID {
+			return s.start, s.end, true
+		}
+	}
+	return 0, 0, false
+}
+
 // CalleesOf returns the bare names of the functions called inside the function
 // identified by symbol, dispatching by file extension. Returns nil for
 // unsupported languages or on any parse failure.

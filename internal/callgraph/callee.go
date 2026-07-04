@@ -27,7 +27,8 @@ type CalleeFinder struct {
 }
 
 func (f CalleeFinder) Find(u unit.Unit) []unit.Clue {
-	if f.RepoDir == "" || u.Scope != unit.ScopeFunc {
+	// Func and chain units only, same reasoning as CallerFinder.Find.
+	if f.RepoDir == "" || (u.Scope != unit.ScopeFunc && u.Scope != unit.ScopeCallChain) {
 		return nil
 	}
 	emitSpec := f.Kinds.Spec && f.Index != nil

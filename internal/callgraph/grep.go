@@ -23,6 +23,7 @@ const (
 type hit struct {
 	file string
 	line int
+	text string // the matched line's content (usage-site rendering; ignored by callers that only resolve)
 }
 
 // grepGo runs `git grep` over the repo's Go/Python files with the given match
@@ -55,7 +56,7 @@ func grepGo(repoDir string, runner *gitcmd.Runner, matchArgs []string, maxHits i
 		if err != nil {
 			continue
 		}
-		hits = append(hits, hit{file: parts[0], line: n})
+		hits = append(hits, hit{file: parts[0], line: n, text: parts[2]})
 		if maxHits > 0 && len(hits) >= maxHits {
 			break
 		}

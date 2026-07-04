@@ -35,8 +35,11 @@ type CallerFinder struct {
 }
 
 func (f CallerFinder) Find(u unit.Unit) []unit.Clue {
-	// Only function units have a name to walk from, and we need a repo to grep.
-	if f.RepoDir == "" || u.Scope != unit.ScopeFunc {
+	// Func and chain units have function names to walk from (a chain walks from
+	// all member symbols; walkNeighbors seeds visited with them, so a member never
+	// surfaces as another member's caller). File units would fan out over every
+	// touched symbol — they degrade to nil. We also need a repo to grep.
+	if f.RepoDir == "" || (u.Scope != unit.ScopeFunc && u.Scope != unit.ScopeCallChain) {
 		return nil
 	}
 	emitSpec := f.Kinds.Spec && f.Index != nil

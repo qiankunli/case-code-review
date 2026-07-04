@@ -29,6 +29,12 @@ const (
 	Routing      Gate = "routing"       // multi-model round-robin pool; off = single model (deterministic)
 	RepoMap      Gate = "repo_map"      // ranked symbol map injected per run (anti guessed-name searches)
 	TypedGraph   Gate = "typed_graph"   // type-checker-resolved call edges for caller/callee/merge (Go)
+
+	// Briefing gates: what source material each unit's briefing pre-inlines so the
+	// review loop doesn't spend rounds fetching it (see internal/agent/briefing.go).
+	UsageSites     Gate = "usage_sites"     // pre-grepped use sites of the changed symbols
+	RangedPreload  Gate = "ranged_preload"  // over-budget file fallback: inline the unit's function bodies
+	NeighborSource Gate = "neighbor_source" // callchain briefing: inline caller/callee neighbor bodies
 )
 
 // def is a gate's registry entry: default state + one-line description.
@@ -54,6 +60,10 @@ var registry = map[Gate]def{
 	Routing:      {true, "multi-model round-robin pool; off = single model (deterministic)"},
 	RepoMap:      {true, "ranked symbol map injected per run (anti guessed-name searches)"},
 	TypedGraph:   {true, "type-checker-resolved call edges for caller/callee/merge (Go)"},
+
+	UsageSites:     {true, "pre-grepped use sites of the changed symbols in the briefing"},
+	RangedPreload:  {true, "over-budget file fallback: inline the unit's function bodies"},
+	NeighborSource: {true, "callchain briefing: inline caller/callee neighbor bodies"},
 }
 
 // Set is a resolved gate configuration. nil is valid and means "all defaults".

@@ -14,16 +14,35 @@ import (
 // structural fields (Scope/Paths/Fragments/Clues) let `--format json` be used to
 // compare how features (call-chain merge, clues) change unit shape, for free.
 type UnitContext struct {
-	ID        string         `json:"id"`
-	Path      string         `json:"path"`                 // representative member path
-	Scope     string         `json:"scope"`                // func / file / callchain
-	Paths     []string       `json:"paths"`                // member files; len>1 = cross-file (call-chain) unit
-	Fragments int            `json:"fragments"`            // changed regions merged into this unit
-	Clues     map[string]int `json:"clues"`                // "<relation>/<kind>" -> count (e.g. owner/rule, used/doc, caller/spec)
-	SpecCases string         `json:"spec_cases,omitempty"` // contract: own spec/case + inherited caller spec + depended-on callee contracts
-	Rules     string         `json:"rules,omitempty"`      // path-glob rule.json + function-level @rule
-	SeeAlso   string         `json:"see_also,omitempty"`   // curated @link pointers
-	Prior     string         `json:"prior,omitempty"`      // a previous review's findings on this unit (to reconcile)
+	ID         string         `json:"id"`
+	Path       string         `json:"path"`                  // representative member path
+	Scope      string         `json:"scope"`                 // func / file / callchain
+	Paths      []string       `json:"paths"`                 // member files; len>1 = cross-file (call-chain) unit
+	Fragments  int            `json:"fragments"`             // changed regions merged into this unit
+	Clues      map[string]int `json:"clues"`                 // "<relation>/<kind>" -> count (e.g. owner/rule, used/doc, caller/spec)
+	SpecCases  string         `json:"spec_cases,omitempty"`  // contract: own spec/case + inherited caller spec + depended-on callee contracts
+	Rules      string         `json:"rules,omitempty"`       // path-glob rule.json + function-level @rule
+	SeeAlso    string         `json:"see_also,omitempty"`    // curated @link pointers
+	Prior      string         `json:"prior,omitempty"`       // a previous review's findings on this unit (to reconcile)
+	Materials  []string       `json:"materials,omitempty"`   // briefing materials (descriptors, not content): own source + related bodies
+	UsageSites string         `json:"usage_sites,omitempty"` // pre-grepped use sites of the changed symbols
+}
+
+// describeMaterials renders a briefer's materials as one-line descriptors so
+// --dry-run shows what the briefing would inline without reading any file.
+func describeMaterials(mats []material) []string {
+	out := make([]string, 0, len(mats))
+	for _, m := range mats {
+		switch {
+		case m.whole && len(m.symbols) > 0:
+			out = append(out, m.path+" (whole; ranged fallback: "+strings.Join(m.symbols, ", ")+")")
+		case m.whole:
+			out = append(out, m.path+" (whole)")
+		default:
+			out = append(out, m.label+" (body)")
+		}
+	}
+	return out
 }
 
 // countClues tallies a Unit's Dossier on the relation×kind matrix, keyed
@@ -69,16 +88,18 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, string
 			rule += specRules
 		}
 		out = append(out, UnitContext{
-			ID:        u.ID,
-			Path:      u.Path(),
-			Scope:     string(u.Scope),
-			Paths:     u.Paths(),
-			Fragments: len(u.Fragments),
-			Clues:     countClues(u.Dossier),
-			SpecCases: specCases,
-			Rules:     rule,
-			SeeAlso:   seeAlso,
-			Prior:     prior,
+			ID:         u.ID,
+			Path:       u.Path(),
+			Scope:      string(u.Scope),
+			Paths:      u.Paths(),
+			Fragments:  len(u.Fragments),
+			Clues:      countClues(u.Dossier),
+			SpecCases:  specCases,
+			Rules:      rule,
+			SeeAlso:    seeAlso,
+			Prior:      prior,
+			Materials:  describeMaterials(a.brieferFor(u.Scope).materials(u)),
+			UsageSites: a.renderUsageSites(u),
 		})
 	}
 	return preview, out, repoMap, nil
