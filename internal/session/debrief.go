@@ -65,6 +65,13 @@ func (sh *SessionHistory) WriteDebrief(sc Scope, d Debrief) {
 // aggregate sums this scope's recorded LLM traffic: rounds and duration per
 // task type, tool-call counts, and token usage (cache split kept — real cost
 // differs by an order of magnitude).
+//
+// Concurrency invariant: ss.mu protects the TaskRecords MAP, but individual
+// records' fields (Response, Duration) are written by SetResponse/SetError
+// without it. Callers must therefore only aggregate once the scope's records
+// have stopped mutating — after the unit's loop AND the async comment pool are
+// done (agent flushes debriefs post-Await; safety is happens-before via the
+// pool join, not this lock).
 func (ss *ScopeSession) aggregate() (rounds map[string]int, toolCalls map[string]int, tokens TokenUsage, durationMs int64) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
