@@ -161,6 +161,10 @@ type Agent struct {
 	// and dispatchUnits (plan / review_filter). Clue gates are applied at finder
 	// assembly in New(), so findClues stays gate-agnostic.
 	features feature.Set
+	// costlyContext records splitUnits' budget-gate verdict (diff focused enough
+	// for call-graph greps) so the briefing's usage-sites grep — same cost class —
+	// rides the same gate. Set in splitUnits, read by renderUsageSites.
+	costlyContext bool
 	// repoMap is the run-level ranked symbol map (computed once in
 	// dispatchUnits, shared by every unit's prompt — like background/rule).
 	// It exists to stop the reviewer from guessing symbol names in searches:
@@ -626,6 +630,7 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 	// function-grained regime (≤ watermark); above it a change is large enough that
 	// we skip straight to cost coarsening (the same gate as the costly finders).
 	costly := total <= defaultUnitWatermark
+	a.costlyContext = costly // briefing's usage-sites grep rides the same budget gate
 	var units []unit.Unit
 	if costly && a.features.Enabled(feature.CallChain) {
 		adj := callgraph.CallAdjacency(a.args.RepoDir, a.args.GitRunner, a.typedGraph, funcIDsOf(files))
@@ -773,6 +778,8 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 
 	// Render this unit's found context (clues) into the prompt blocks.
 	specCases, specRules, seeAlso, priorFindings := renderClues(u.Dossier)
+	// Pre-grep where else the repo references the changed symbols ({{usage_sites}}).
+	usageSites := a.renderUsageSites(u)
 	// Per-function @rule (from clues) augments the path-glob rule.json criteria;
 	// both flow into {{system_rule}} (plan + main).
 	rule := a.resolveSystemRule(strings.ToLower(newPath))
@@ -812,7 +819,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	}
 
 	rawMsgs := a.args.Template.MainTask.Messages
-	buildMessages := func(unitSource string) []llm.Message {
+	buildMessages := func(unitSource, relatedSource string) []llm.Message {
 		messages := make([]llm.Message, 0, len(rawMsgs))
 		for _, m := range rawMsgs {
 			content := m.Content
@@ -821,8 +828,13 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 			content = strings.ReplaceAll(content, "{{system_rule}}", rule)
 			content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
 			content = strings.ReplaceAll(content, "{{diff}}", u.Diff())
-			// The unit's post-change source, inlined so round 1 isn't spent fetching it.
+			// The briefing's materials: the unit's own post-change source, plus
+			// context-only related bodies — inlined so early rounds aren't spent
+			// fetching them (see briefing.go).
 			content = strings.ReplaceAll(content, "{{unit_source}}", unitSource)
+			content = strings.ReplaceAll(content, "{{related_source}}", relatedSource)
+			// Pre-grepped blast-radius map of the changed symbols.
+			content = strings.ReplaceAll(content, "{{usage_sites}}", usageSites)
 			content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
 			content = strings.ReplaceAll(content, "{{spec_cases}}", specCases)
 			// Curated see-also pointers; the reviewer fetches content on demand.
@@ -847,16 +859,21 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		return messages
 	}
 
-	unitSource := a.buildUnitSource(ctx, u.Paths())
-	messages := buildMessages(unitSource)
+	unitSource, relatedSource := a.renderMaterials(ctx, a.brieferFor(u.Scope).materials(u))
+	messages := buildMessages(unitSource, relatedSource)
 	maxAllowed := a.args.Template.MaxTokens
 	tokenLimit := maxAllowed * 4 / 5 // 80% of MaxTokens
+	// The preload is an optimization, never the reason a unit gets skipped by the
+	// token guard below — degrade stepwise (drop the context-only bodies first,
+	// then the own source) and let the reviewer fetch on demand via file_read
+	// before giving up on the unit.
+	if relatedSource != "" && llmloop.CountMessagesTokens(messages) > tokenLimit {
+		relatedSource = ""
+		messages = buildMessages(unitSource, relatedSource)
+	}
 	if unitSource != sourceNotPreloaded && llmloop.CountMessagesTokens(messages) > tokenLimit {
-		// The preload is an optimization, never the reason a unit gets skipped by the
-		// token guard below — drop it and let the reviewer fetch on demand via
-		// file_read before giving up on the unit.
 		unitSource = sourceNotPreloaded
-		messages = buildMessages(unitSource)
+		messages = buildMessages(unitSource, relatedSource)
 	}
 
 	tokenCount := llmloop.CountMessagesTokens(messages)
@@ -875,54 +892,6 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	// (runReviewFilters), so sibling Units of the same file don't filter each
 	// other's comments against the wrong diff slice.
 	return a.runner.RunPerFile(ctx, messages, sc)
-}
-
-// preloadSourceBudget caps the total bytes of unit source inlined into the prompt.
-// Sized so typical units fit whole while a giant file can't crowd the prompt toward
-// the token guard (which would skip the unit's review outright).
-const preloadSourceBudget = 32 * 1024
-
-// sourceNotPreloaded fills {{unit_source}} when nothing was inlined, so the literal
-// placeholder never leaks and the reviewer knows to fetch on demand.
-const sourceNotPreloaded = "(not preloaded — fetch what you need via file_read)"
-
-// buildUnitSource inlines the post-change source of the unit's file(s) for
-// {{unit_source}} — session traces show round 1 is otherwise always "file_read the
-// whole reviewed file": a full LLM round paid to fetch content ccr already has.
-// Reads go through the file_read tool's own FileReader (mode-aware: workspace reads
-// disk, range/commit read `git show <ref>:`) and mirror its numbered-line format,
-// so inlined source and tool output look identical to the model. A file over the
-// remaining budget is named but not inlined (ranged file_read still works); an
-// unreadable path (deleted file) is skipped.
-func (a *Agent) buildUnitSource(ctx context.Context, paths []string) string {
-	fr := a.fileReader()
-	if fr == nil {
-		return sourceNotPreloaded
-	}
-	var b strings.Builder
-	budget := preloadSourceBudget
-	for _, p := range paths {
-		content, err := fr.Read(ctx, p)
-		if err != nil {
-			continue
-		}
-		if len(content) > budget {
-			fmt.Fprintf(&b, "File: %s — %d bytes exceeds the preload budget; read on demand via file_read\n\n", p, len(content))
-			continue
-		}
-		budget -= len(content)
-		lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
-		fmt.Fprintf(&b, "File: %s (Total lines: %d)\n", p, len(lines))
-		for i, line := range lines {
-			fmt.Fprintf(&b, "%d|%s\n", i+1, line)
-		}
-		b.WriteString("\n")
-	}
-	out := strings.TrimRight(b.String(), "\n")
-	if out == "" {
-		return sourceNotPreloaded
-	}
-	return out
 }
 
 // fileReader unwraps the file_read tool's FileReader so the preload reads exactly
