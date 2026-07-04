@@ -16,6 +16,7 @@
   - **关系轴** `RelationCollector`：`unit → [{symbol, relation}]`（self/owner/used 各一个 collector；caller/callee 走 call-graph walk）。
   - **来源轴**（符号 → clues）：查 spec index 取 authored marks + 读源码抽 derived doc，按到达它的 relation 打标。
 - **Dossier** — 一个 unit **去重后**的 clue 集合（每条带 kind × relation），review loop 的证据输入。
+- **Briefing** — 呈给评审员的交底：**一个 unit 一条 user message**。所有 scope 共享同一条消息骨架（模板），按 scope 变的只有**预载的源码材料**（见关键设计 8）。dossier 是收集到的证据，briefing 是把证据和材料摆上评审员桌面的那一下。
 
 两轴正交的意义：加一种关系或加一种来源**互不牵动**，不会相乘出一排新 finder。
 
@@ -25,7 +26,9 @@
 diff ─Splitter→ Fragment ─Merger(callchain + file)→ Unit
      → related = ⋃ RelationCollector(Unit)            # 关系轴: unit → [{symbol, relation}]
      → clues   = ⋃ cluesFor(symbol)  按 relation 打标   # 来源轴: authored marks + derived doc
-     → dedup → Unit.Dossier → review loop（逐条核对契约守恒）
+     → dedup → Unit.Dossier
+     → briefing = 共享骨架 + dossier 渲染 + materials(scope)   # 一个 unit 一条 user message
+     → review loop（逐条核对契约守恒）
 ```
 
 **唯一不变量：最终 dossier 去重**。收 clue 与 merge 的先后无关——碎片级收还是 unit 级收都行，末尾 dedup 让结果幂等：同 `(relation, kind, text)` 合一；指向**本 unit 成员**的边丢弃（chain unit 内成员 A 不把成员 B 当自己的 callee/used clue）。唯一真正的先后依赖在别处：Group 的 call-chain 策略需要「diff 内部调用邻接」这项 relation 查询——那是 merge 的输入，与收 clue 无关。
@@ -52,9 +55,15 @@ diff ─Splitter→ Fragment ─Merger(callchain + file)→ Unit
 
 7. **可测性**：dry-run 的 `clue_coverage` 是 **relation × kind 矩阵**（键 `owner/rule`、`used/doc`、`caller/spec`…），每格在真实 diff 上 fire 多少免费可见——消融对比（feature gate）之外的常开观测层。
 
+8. **Briefing：一个 unit 一条 user message，骨架共享、材料按 scope**——为何：loop 的早期轮次被证明花在"取 ccr 已知这个 unit 需要的内容"上（读被评审文件、搜改动符号的使用点——见 eval/README §7 的 trajectory 数据），这些"能一步定界"的内容按静态注入的判据（关键设计 4）应该预载，开放式探索才留 loop tool。结构上分两半：
+   - **briefer（render protocol）**：per-scope 决定预载哪些材料——契约是**数据（材料清单）不是接口渲染**，func/file 给自己的源文件，callchain 额外给 caller/callee 邻居的**函数体**（不是整文件）。这样预算引擎、file_read 镜像格式、降级次序保持单源，不随 scope 数相乘。
+   - **共享引擎**：一个字节预算按优先级填（评审对象源码 > context-only 材料），超预算的大文件降级为只内联改动函数体而非整体放弃；token guard 降级也分级（先丢邻居再丢本体）。
+   材料语义分两个区：被评审文件进 `unit_source`（"就是它，别再读"），邻居函数体进 `related_source`（"只作上下文，不评审"）——混在一区会诱导对非 diff 代码发 finding。usage-sites 预 grep（改动符号的全仓引用点）与 caller/callee walk 同费别，骑同一条 costly 预算闸门。各材料类各挂 feature gate，消融坐标系与 kind 门一致。
+
 ## References
 
 - `diff → fragment → unit`：[`unit-model.md`](unit-model.md)
 - 评审语义（契约守恒三问、caller 上溯 spec、聚合）：workspace `docs/spec-aware-review.md`
-- 实现锚点：`internal/spec/related.go`（RelationCollector / RelatedFinder / SelfGates）、`internal/spec/{py,go}doc.go` + `docstring.go`（derived doc）、`internal/spec/deps.go`（依赖 spec 发现）、`internal/callgraph/walk.go`（caller/callee 走图 + 邻居 doc）、`internal/unit/clue.go`（Clue/Relation/Dossier 类型）
+- 实现锚点：`internal/spec/related.go`（RelationCollector / RelatedFinder / SelfGates）、`internal/spec/{py,go}doc.go` + `docstring.go`（derived doc）、`internal/spec/deps.go`（依赖 spec 发现）、`internal/callgraph/walk.go`（caller/callee 走图 + 邻居 doc）、`internal/callgraph/usage.go`（usage-sites 预 grep）、`internal/unit/clue.go`（Clue/Relation/Dossier 类型）、`internal/agent/briefing.go`（briefer 协议 + 材料预算引擎）
+- 驱动 briefing 设计的 trajectory 证据与方法论：`eval/README.md` §7
 - 资产侧（symbol-id / fqn / marker / specgen，Go + Python）：`spec-case`

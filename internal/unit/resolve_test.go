@@ -2,6 +2,22 @@ package unit
 
 import "testing"
 
+func TestSymbolSpan(t *testing.T) {
+	src := "package p\n\nfunc A() {\n}\n\ntype S struct{}\n\nfunc (s *S) M() int {\n\treturn 1\n}\n"
+	if start, end, ok := SymbolSpan("p/x.go", src, "p/x.go::A"); !ok || start != 3 || end != 4 {
+		t.Fatalf("A span = (%d,%d,%v), want (3,4,true)", start, end, ok)
+	}
+	if start, end, ok := SymbolSpan("p/x.go", src, "p/x.go::S.M"); !ok || start != 8 || end != 10 {
+		t.Fatalf("S.M span = (%d,%d,%v), want (8,10,true)", start, end, ok)
+	}
+	if _, _, ok := SymbolSpan("p/x.go", src, "p/x.go::Nope"); ok {
+		t.Fatal("unknown symbol must not resolve")
+	}
+	if _, _, ok := SymbolSpan("p/x.txt", src, "p/x.txt::A"); ok {
+		t.Fatal("unsupported language must not resolve")
+	}
+}
+
 func TestGoFuncIDAt(t *testing.T) {
 	src := `package p
 
@@ -18,9 +34,9 @@ func (s *Svc) Beta() int {
 		want string
 		ok   bool
 	}{
-		{4, "p.go::Alpha", true},     // helper() call, inside Alpha
-		{8, "p.go::Svc.Beta", true},  // inside the method (receiver normalized)
-		{1, "", false},               // package line, outside any func
+		{4, "p.go::Alpha", true},    // helper() call, inside Alpha
+		{8, "p.go::Svc.Beta", true}, // inside the method (receiver normalized)
+		{1, "", false},              // package line, outside any func
 	}
 	for _, c := range cases {
 		id, ok := GoFuncIDAt("p.go", src, c.line)
