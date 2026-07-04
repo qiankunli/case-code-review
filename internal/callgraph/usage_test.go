@@ -36,11 +36,16 @@ func TestFindUsages(t *testing.T) {
 
 func TestFindUsages_SkipsCommentProse(t *testing.T) {
 	repo := newRepo(t, map[string]string{
-		"g.go":   "package p\n\nfunc graph() int { return 1 }\n",
-		"use.go": "package p\n\n// the call graph is walked lazily\nvar n = graph()\n",
+		"g.go": "package p\n\nfunc graph() int { return 1 }\n",
+		// A dereference assignment starts with '*' but is NOT comment prose.
+		"use.go": "package p\n\n// the call graph is walked lazily\nvar n = graph()\n\nfunc set(p *int) {\n\t*p = graph()\n}\n",
 	})
 	got := FindUsages(repo, nil, []string{"g.go::graph"}, map[string]bool{"g.go": true})
-	if len(got) != 1 || got[0].Text != "var n = graph()" {
-		t.Fatalf("comment prose must be skipped, got %+v", got)
+	texts := map[string]bool{}
+	for _, u := range got {
+		texts[u.Text] = true
+	}
+	if !texts["var n = graph()"] || !texts["*p = graph()"] || len(got) != 2 {
+		t.Fatalf("want the var and deref usages only, got %+v", got)
 	}
 }

@@ -36,7 +36,9 @@ func FindUsages(repoDir string, runner *gitcmd.Runner, symbolIDs []string, exclu
 		return nil
 	}
 	var out []Usage
-	seen := map[string]bool{} // file:line across symbols (overloads/methods sharing a name)
+	// Dedup is per symbol (key carries the id): the map is rendered grouped by
+	// symbol, and a line referencing two changed symbols is a hit for each.
+	seen := map[string]bool{}
 	for _, id := range symbolIDs {
 		name := funcName(id)
 		if name == "" {
@@ -52,7 +54,7 @@ func FindUsages(repoDir string, runner *gitcmd.Runner, symbolIDs []string, exclu
 			if excludePaths[h.file] || isCommentLine(h.text) {
 				continue
 			}
-			key := h.file + ":" + strconv.Itoa(h.line)
+			key := id + "\x00" + h.file + ":" + strconv.Itoa(h.line)
 			if seen[key] {
 				continue
 			}
@@ -72,11 +74,12 @@ func FindUsages(repoDir string, runner *gitcmd.Runner, symbolIDs []string, exclu
 
 // isCommentLine reports whether a grep hit is comment prose — a short method
 // name (`graph`, `run`) word-matches ordinary English in comments, and those
-// hits carry no blast-radius signal. Line-granular by necessity (the grep gives
-// one line); a name inside a trailing comment or block-comment body slips
-// through, which only costs a wasted map entry.
+// hits carry no blast-radius signal. Deliberately NOT matching a bare `*`
+// prefix: that's a real dereference assignment in Go (`*ptr = Get()`), while
+// gofmt-era block-comment bodies are rare — the false negative there only
+// costs a wasted map entry. Line-granular by necessity (the grep gives one
+// line), so a name inside a trailing comment slips through too.
 func isCommentLine(text string) bool {
 	t := strings.TrimSpace(text)
-	return strings.HasPrefix(t, "//") || strings.HasPrefix(t, "#") ||
-		strings.HasPrefix(t, "*") || strings.HasPrefix(t, "/*")
+	return strings.HasPrefix(t, "//") || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "/*")
 }
