@@ -50,7 +50,10 @@ def load_sessions(paths: list[str]) -> list[dict]:
     for f in files:
         manifest, findings = {}, []
         try:
-            for line in f.read_text(encoding="utf-8").splitlines():
+            # errors="replace": a stray non-UTF-8 byte in a record must not kill
+            # the whole batch — UnicodeDecodeError is a ValueError and would
+            # escape the (OSError, JSONDecodeError) except below.
+            for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -73,12 +76,15 @@ def anchor_of(manifest: dict) -> str:
 
 
 def git(repo: str, *args: str) -> tuple[str, bool]:
+    # No text=True: git output may carry non-UTF-8 bytes (legacy-encoded commit
+    # messages), and the implicit strict decode raises UnicodeDecodeError — a
+    # ValueError that would escape this except and kill the whole batch.
     try:
         r = subprocess.run(["git", "-C", repo, *args],
-                           capture_output=True, text=True, timeout=GIT_TIMEOUT)
+                           capture_output=True, timeout=GIT_TIMEOUT)
     except (subprocess.TimeoutExpired, OSError):
         return "", False
-    return r.stdout, r.returncode == 0
+    return r.stdout.decode("utf-8", errors="replace"), r.returncode == 0
 
 
 def commits_touching_lines(repo: str, anchor: str, target: str,
@@ -123,17 +129,22 @@ def classify(repo: str, anchor: str, target: str, finding: dict) -> dict:
         label["note"] = "no anchor in manifest (pre-v2 session?)"
         return label
 
-    commits, ok = commits_touching_lines(repo, anchor, target, path, start, end)
-    if ok:
-        label["class"] = "line_touched" if commits else "untouched"
-        label["commits"] = commits
-        return label
+    # A finding with no line data (file-level concern) must not be tested
+    # against line 1: a hit there would be a fake line_touched, a miss a fake
+    # untouched. Degrade straight to file-level evidence, and say so.
+    if start >= 1:
+        commits, ok = commits_touching_lines(repo, anchor, target, path, start, end)
+        if ok:
+            label["class"] = "line_touched" if commits else "untouched"
+            label["commits"] = commits
+            return label
 
     commits = commits_touching_file(repo, anchor, target, path)
     label["class"] = "file_touched" if commits else "untouched"
     label["commits"] = commits
     if commits:
-        label["note"] = "line-log unavailable (rename/delete?); file-level evidence only"
+        label["note"] = ("no line data; file-level evidence only" if start < 1
+                         else "line-log unavailable (rename/delete?); file-level evidence only")
     return label
 
 
