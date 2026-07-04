@@ -131,6 +131,8 @@ const sourceNotPreloaded = "(not preloaded — fetch what you need via file_read
 // split by prio: unitSource (prio 0, the reviewed files — fills {{unit_source}})
 // and relatedSource (prio >0, context-only bodies — fills {{related_source}}),
 // because the two carry different review semantics (review this vs. don't).
+// outcomes records each material's fate ("whole p" / "ranged p" / "budget_miss
+// p" / "dropped label" / "unreadable p") for the unit's debrief.
 //
 // Reads go through the file_read tool's own FileReader (mode-aware: workspace
 // reads disk, range/commit read `git show <ref>:`) and mirror its numbered-line
@@ -138,10 +140,10 @@ const sourceNotPreloaded = "(not preloaded — fetch what you need via file_read
 // whole-file material over the remaining budget falls back to just its
 // functions' bodies (ranged_preload gate); with no symbols (or gate off) it is
 // named but not inlined so a ranged file_read still works.
-func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSource, relatedSource string) {
+func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSource, relatedSource string, outcomes []string) {
 	fr := a.fileReader()
 	if fr == nil {
-		return sourceNotPreloaded, ""
+		return sourceNotPreloaded, "", nil
 	}
 
 	// Stable fill order: essentials before aux. Sort is by prio only (slice order
@@ -159,7 +161,9 @@ func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSourc
 		}
 		content, err := fr.Read(ctx, m.path)
 		if err != nil {
-			continue // deleted/unreadable — the placeholder degrade below handles it
+			// Deleted/unreadable — the placeholder degrade below handles it.
+			outcomes = append(outcomes, "unreadable "+m.path)
+			continue
 		}
 		lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 
@@ -170,6 +174,7 @@ func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSourc
 				fmt.Fprintf(out, "%d|%s\n", i+1, line)
 			}
 			out.WriteString("\n")
+			outcomes = append(outcomes, "whole "+m.path)
 			continue
 		}
 
@@ -179,22 +184,26 @@ func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSourc
 		if len(m.symbols) > 0 && (!m.whole || a.features.Enabled(feature.RangedPreload)) {
 			if rendered := renderSpans(m, content, lines, &budget); rendered != "" {
 				out.WriteString(rendered)
+				outcomes = append(outcomes, "ranged "+m.path)
 				continue
 			}
 		}
 
 		if m.whole {
 			fmt.Fprintf(out, "File: %s — %d bytes exceeds the preload budget; read on demand via file_read\n\n", m.path, len(content))
+			outcomes = append(outcomes, "budget_miss "+m.path)
+			continue
 		}
 		// Aux material that couldn't be inlined is dropped silently — it's bonus
 		// context; a note would spend prompt on what the reviewer can't use.
+		outcomes = append(outcomes, "dropped "+m.label)
 	}
 
 	unitSource = strings.TrimRight(essential.String(), "\n")
 	if unitSource == "" {
 		unitSource = sourceNotPreloaded
 	}
-	return unitSource, strings.TrimRight(aux.String(), "\n")
+	return unitSource, strings.TrimRight(aux.String(), "\n"), outcomes
 }
 
 // renderSpans inlines each of m.symbols' bodies from content as a ranged block
@@ -227,17 +236,18 @@ func renderSpans(m material, content string, lines []string, budget *int) string
 }
 
 // renderUsageSites pre-greps where else the repo references the unit's changed
-// symbols and renders a `path:line: text` blast-radius map for {{usage_sites}}.
-// Same cost class as the caller/callee walk, so it honors the same costly-context
-// budget gate (a.costlyContext) on top of its own feature gate. Returns "" when
-// gated off or nothing was found.
-func (a *Agent) renderUsageSites(u unit.Unit) string {
+// symbols and renders a `path:line: text` blast-radius map for {{usage_sites}},
+// plus the site count for the unit's debrief. Same cost class as the
+// caller/callee walk, so it honors the same costly-context budget gate
+// (a.costlyContext) on top of its own feature gate. Returns "" when gated off
+// or nothing was found.
+func (a *Agent) renderUsageSites(u unit.Unit) (string, int) {
 	if !a.features.Enabled(feature.UsageSites) || !a.costlyContext {
-		return ""
+		return "", 0
 	}
 	symbols := u.AllSymbols()
 	if len(symbols) == 0 {
-		return ""
+		return "", 0
 	}
 	exclude := map[string]bool{}
 	for _, p := range u.Paths() {
@@ -245,7 +255,7 @@ func (a *Agent) renderUsageSites(u unit.Unit) string {
 	}
 	usages := callgraph.FindUsages(a.args.RepoDir, a.args.GitRunner, symbols, exclude)
 	if len(usages) == 0 {
-		return ""
+		return "", 0
 	}
 	var b strings.Builder
 	last := ""
@@ -256,5 +266,5 @@ func (a *Agent) renderUsageSites(u unit.Unit) string {
 		}
 		fmt.Fprintf(&b, "  %s:%d: %s\n", us.File, us.Line, us.Text)
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.TrimRight(b.String(), "\n"), len(usages)
 }
