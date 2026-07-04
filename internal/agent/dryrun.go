@@ -80,6 +80,7 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, string
 	for _, u := range units {
 		// Mirror reviewUnit's context assembly: clues + the path-glob rule.json.
 		specCases, specRules, seeAlso, prior := renderClues(u.Dossier)
+		usageSites, _ := a.renderUsageSites(u)
 		rule := a.resolveSystemRule(strings.ToLower(u.Path()))
 		if specRules != "" {
 			if rule != "" {
@@ -99,7 +100,7 @@ func (a *Agent) DryRun(ctx context.Context) (*DiffPreview, []UnitContext, string
 			SeeAlso:    seeAlso,
 			Prior:      prior,
 			Materials:  describeMaterials(a.brieferFor(u.Scope).materials(u)),
-			UsageSites: a.renderUsageSites(u),
+			UsageSites: usageSites,
 		})
 	}
 	return preview, out, repoMap, nil

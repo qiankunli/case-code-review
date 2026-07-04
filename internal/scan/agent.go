@@ -564,7 +564,10 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) error {
 		return nil
 	}
 
-	return a.runner.RunPerFile(ctx, messages, scanScope(it.Path))
+	// Scan has no per-unit debrief (no diff units); the outcome is dropped and
+	// truncation still surfaces through the runner's unit_incomplete warnings.
+	_, err := a.runner.RunPerFile(ctx, messages, scanScope(it.Path))
+	return err
 }
 
 // maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable

@@ -1,0 +1,106 @@
+package session
+
+import (
+	"time"
+
+	"testing"
+
+	"github.com/qiankunli/case-code-review/internal/llm"
+)
+
+func TestWriteDebrief(t *testing.T) {
+	t.Setenv(evalTagEnv, "corpus-v1")
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode:  ReviewModeWorkspace,
+		Features:    map[string]bool{"usage_sites": true},
+		ToolVersion: "v1.7.1 (abc123)",
+		Params:      map[string]any{"unit_watermark": 10},
+	})
+	sh.SetDiffStats(2, 30, 5)
+
+	// Simulate one unit's traffic: 2 main rounds (one with a tool call) + 1 plan.
+	sc := Scope{ID: "a.go#F", Kind: "unit", Type: "func", Paths: []string{"a.go"}}
+	ss := sh.GetOrCreateScope(sc)
+	mk := func(taskType TaskType, toolName string) {
+		rec := &TaskRecord{Type: taskType, scopeSession: ss}
+		rec.Duration = 2 * time.Second
+		rr := &ResponseRecord{Usage: &TokenUsage{PromptTokens: 100, CompletionTokens: 10, CacheReadTokens: 40}}
+		if toolName != "" {
+			rr.ToolCalls = []llm.ToolCall{{Function: llm.FunctionCall{Name: toolName}}}
+		}
+		rec.Response = rr
+		ss.TaskRecords[taskType] = append(ss.TaskRecords[taskType], rec)
+	}
+	mk(MainTask, "file_read")
+	mk(MainTask, "task_done")
+	mk(PlanTask, "")
+
+	sh.WriteDebrief(sc, Debrief{
+		Outcome:      "completed",
+		Formed:       "func",
+		Fragments:    1,
+		Insertions:   12,
+		Deletions:    3,
+		Degradations: []string{"related_source_dropped"},
+		Clues:        map[string]int{"caller/spec": 1},
+		ClueRefs:     []string{"b.go::Entry"},
+		Materials:    []string{"whole a.go"},
+		UsageSites:   4,
+	})
+	sh.Finalize()
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+
+	var start, deb, end map[string]any
+	for _, r := range records {
+		switch r["type"] {
+		case "session_start":
+			start = r
+		case "debrief":
+			deb = r
+		case "session_end":
+			end = r
+		}
+	}
+
+	// Manifest: the transcript self-describes its configuration and population.
+	if start["schema_version"].(float64) != 2 || start["tool_version"] != "v1.7.1 (abc123)" ||
+		start["eval_tag"] != "corpus-v1" {
+		t.Fatalf("manifest fields off: %v", start)
+	}
+	if feats, _ := start["features"].(map[string]any); feats["usage_sites"] != true {
+		t.Fatalf("features missing: %v", start["features"])
+	}
+
+	if deb == nil {
+		t.Fatal("no debrief record written")
+	}
+	if deb["outcome"] != "completed" || deb["formed"] != "func" || deb["scope_id"] != "a.go#F" {
+		t.Fatalf("debrief identity off: %v", deb)
+	}
+	// Cost rollup aggregated from the scope's task records, not caller-supplied.
+	rounds := deb["rounds"].(map[string]any)
+	if rounds["main_task"].(float64) != 2 || rounds["plan_task"].(float64) != 1 {
+		t.Fatalf("rounds off: %v", rounds)
+	}
+	tools := deb["tool_calls"].(map[string]any)
+	if tools["file_read"].(float64) != 1 || tools["task_done"].(float64) != 1 {
+		t.Fatalf("tool_calls off: %v", tools)
+	}
+	tokens := deb["tokens"].(map[string]any)
+	if tokens["prompt_tokens"].(float64) != 300 || tokens["cache_read_tokens"].(float64) != 120 {
+		t.Fatalf("tokens off: %v", tokens)
+	}
+	if deb["duration_ms"].(float64) != 6000 {
+		t.Fatalf("duration off: %v", deb["duration_ms"])
+	}
+	if deb["usage_sites"].(float64) != 4 || deb["insertions"].(float64) != 12 {
+		t.Fatalf("briefing/size fields off: %v", deb)
+	}
+
+	// Diff totals land in session_end (cost normalization denominators).
+	if end["diff_files"].(float64) != 2 || end["diff_insertions"].(float64) != 30 || end["diff_deletions"].(float64) != 5 {
+		t.Fatalf("diff stats off: %v", end)
+	}
+}

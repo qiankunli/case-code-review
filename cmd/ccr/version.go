@@ -12,6 +12,15 @@ var (
 	BuildDate = ""
 )
 
+// versionString is the build identity stamped into session manifests
+// ("v1.7.1 (abc123)" / "dev").
+func versionString() string {
+	if GitCommit != "" {
+		return Version + " (" + GitCommit + ")"
+	}
+	return Version
+}
+
 func printVersion() {
 	fmt.Printf("case-code-review %s", Version)
 	if GitCommit != "" {
