@@ -171,6 +171,13 @@ type Agent struct {
 	// for call-graph greps) so the briefing's usage-sites grep — same cost class —
 	// rides the same gate. Set in splitUnits, read by renderUsageSites.
 	costlyContext bool
+	// pendingDebriefs queues each unit's debrief until CommentWorkerPool.Await():
+	// async comment processing (relocation) appends task records to the unit's
+	// scope AFTER RunPerFile returns, so writing the debrief there would both
+	// race those records' field writes and undercount the cost rollup. Flushed
+	// in dispatchUnits once the pool is drained.
+	debriefMu       sync.Mutex
+	pendingDebriefs []pendingDebrief
 	// repoMap is the run-level ranked symbol map (computed once in
 	// dispatchUnits, shared by every unit's prompt — like background/rule).
 	// It exists to stop the reviewer from guessing symbol names in searches:
@@ -533,6 +540,10 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 	if a.args.CommentWorkerPool != nil {
 		a.args.CommentWorkerPool.Await()
 	}
+
+	// Pool drained → every scope's task records (incl. async relocation rounds)
+	// are final; debriefs can now aggregate them race-free and complete.
+	a.flushDebriefs()
 
 	failed := atomic.LoadInt64(&a.unitFailed)
 	if failed > 0 && failed == dispatched {
@@ -954,7 +965,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		// A governor's decision, not a failure — the debrief must keep the two
 		// distinguishable (lowering the threshold shifts skips, not the fault rate).
 		deb.Outcome, deb.Reason = "skipped_policy", msg
-		a.session.WriteDebrief(sc, deb)
+		a.queueDebrief(sc, deb)
 		return nil
 	}
 
@@ -963,8 +974,37 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	// other's comments against the wrong diff slice.
 	outcome, err := a.runner.RunPerFile(ctx, messages, sc)
 	deb.Outcome, deb.Reason = outcome.State, outcome.Reason
-	a.session.WriteDebrief(sc, deb)
+	a.queueDebrief(sc, deb)
 	return err
+}
+
+// pendingDebrief is a unit's debrief awaiting the post-Await flush (see the
+// Agent.pendingDebriefs field for why it can't be written at unit end).
+type pendingDebrief struct {
+	sc  session.Scope
+	deb session.Debrief
+}
+
+// queueDebrief parks a unit's debrief for the post-Await flush. Units run
+// concurrently, hence the lock.
+func (a *Agent) queueDebrief(sc session.Scope, deb session.Debrief) {
+	a.debriefMu.Lock()
+	defer a.debriefMu.Unlock()
+	a.pendingDebriefs = append(a.pendingDebriefs, pendingDebrief{sc: sc, deb: deb})
+}
+
+// flushDebriefs writes all queued debriefs. Must run after the unit goroutines
+// are joined AND CommentWorkerPool.Await() — only then have all of a scope's
+// task records (including async relocation rounds) stopped mutating, so the
+// cost rollup is complete and race-free.
+func (a *Agent) flushDebriefs() {
+	a.debriefMu.Lock()
+	pending := a.pendingDebriefs
+	a.pendingDebriefs = nil
+	a.debriefMu.Unlock()
+	for _, p := range pending {
+		a.session.WriteDebrief(p.sc, p.deb)
+	}
 }
 
 // clueRefs collects the deduped symbol-ids a dossier points at, in dossier
