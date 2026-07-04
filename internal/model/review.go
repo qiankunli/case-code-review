@@ -13,7 +13,12 @@ type LlmComment struct {
 	// history by symbol rather than by drift-prone line numbers. Empty when the line
 	// resolves to no function (or a non-Go/Python file).
 	SymbolID string `json:"symbol_id,omitempty"`
-	Thinking string `json:"thinking,omitempty"`
+	// Fingerprint is the finding's stable identity: a short hash of path+content,
+	// deliberately excluding line numbers (relocation and later edits shift them).
+	// Human labels (important/minor/…) and posterior evidence key on it, so a
+	// re-run reproducing the same finding joins to the same label.
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
 	// Alias is the routing alias of the model that produced this comment (from
 	// routing.models[].alias). Lets callers compare per-model output when a multi-model
 	// pool spreads files across models (e.g. round-robin). Empty for single-model runs
