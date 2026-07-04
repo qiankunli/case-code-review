@@ -9,6 +9,12 @@
 
 > **与 ocr 的本质区别 = 把 unit 当一等概念**。一切按 unit 走：`--spec`(契约) / `--rule`(准则) / `--history`(上轮评审反馈) 都是按 symbol-id 注入的 **per-unit 上下文**，`Clue`/`ClueFinder` 把 context 挂到 unit。ocr 停在 file 级、没有 unit。判断一个新能力是否"对味"，就看它有没有让 unit 更一等。
 
+**三追求 × 三抓手**——评估任何改动方向的坐标系：
+
+- **追求**（互相拉扯，不能单独优化）：①**健壮性**——每个 unit 的 loop 真跑完（大文件不被预算跳过、长链不被超时截断；截断的沉默最危险，长得像"没问题"）；②**准确性**——真问题找得到（不空转交 clean、不编造 finding）；③**成本**——时间/token 有界（跟不上开发节奏，再准也会被绕过）。
+- **抓手**（都围着 review loop 这一个核心）：①**loop 能力**——工具面、记忆机制（压缩、超时 wrap-up）；②**loop 粒度**——file → unit，贴近"一次改动 = 一个需求及其相关文件"（函数 → 调用链 → 文件的归并阶梯）；③**loop context**——自捕获的（现场解析、grep、call graph、doc 抽取）追求零采纳成本，外部输入的（spec/case/rule/link、history、需求背景）追求高信号。
+- 量测归 `eval/README.md`：质量轴 = 准确性，效率轴 = 成本，截断/超时/未收尾信号 = 健壮性。
+
 **边界**：ccr 是**消费侧引擎**。spec/case/rule/link 资产的**定义、各语言写法、`spec.json` schema、symbol-id 契约**，以及产 `spec.json` 的 **`specgen` 抽取器**（Go + Python 参考实现），都在独立项目 [`spec-case`](https://github.com/qiankunli/spec-case)，**不在 ccr**。ccr 只消费 `spec.json` + 现场解析函数边界。
 
 ## 代码地图与核心模块
