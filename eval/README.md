@@ -101,6 +101,17 @@
 - **落地**：PR #86（usage-sites 预 grep / 大文件 ranged 降级 / callchain 邻居函数体，三个独立 gate）；设计见 `docs/context-model.md` 关键设计 8。
 - **复测待做**：gate 消融（`usage_sites/ranged_preload/neighbor_source` leave-one-out）+ 同工作负载重放（§2.5），看 code_search 次数与空搜率的边际变化。
 
+### 8. 采集面：Debrief 与 run manifest（session schema v2）
+
+指标体系"结果 × 归因"的数据来源，原则：**写盘时顺手记当时才知道的事，别指望事后从 trajectory 反推**（unit 怎么形成、策略性跳过 vs 故障、briefing 降级——这些事后推不出来）。
+
+- **run manifest**（session_start / session_end）：schema_version、tool_version、features 全量、params（watermark/预算）、diff 规模——趋势必须 join 的混杂因子；`CCR_EVAL_TAG` 环境变量给 run 打 population 标（固定回归集 vs 滚动生产，两者不可比）。
+- **Debrief**（每 unit 一条，loop 收尾写；Briefing 进去、Debrief 出来）：
+  - 健壮性 → `outcome`（completed/truncated/timeout/llm_error/**skipped_policy**——governor 决定和故障分开算）+ `degradations`（token guard 丢 related/own source）；
+  - 粒度 → `formed`（func/file/**coalesce**/chain——Scope 区分不了"天然整文件"和"被成本轴并粗"）+ 行数；
+  - context → `clues`（relation×kind 计数）+ `clue_refs`（symbol-id 列表，比内容不比计数）+ `materials` 逐条结局 + `usage_sites` 条数；
+  - 成本 → rounds/tool_calls/tokens（cache 拆开）/duration，从 scope 的 llm 记录聚合，eval 不用再手写统计脚本。
+
 ## References
 
 - ATIF 导出：`ccr export --format atif <session.jsonl>`（session 落盘位置见 `internal/session/`）

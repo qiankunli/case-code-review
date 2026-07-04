@@ -38,6 +38,22 @@ const (
 // unit_incomplete and their silence must not read as a clean review.
 const wrapUpPrompt = "BUDGET NEARLY EXHAUSTED — stop investigating now. Based only on the evidence you already gathered: call code_comment for each issue you are confident about, then call task_done. If you found no issues in what you managed to review, call task_done and state explicitly which parts you reviewed. Do not call any other tools."
 
+// Outcome is how a unit's main loop terminated — the terminal state a debrief
+// records. RunPerFile computes it anyway (completed / truncation reason /
+// deadline / LLM error); returning it saves callers re-deriving the ending from
+// warnings, where two units of one file would collide on the path key.
+type Outcome struct {
+	State  string // OutcomeCompleted | OutcomeTruncated | OutcomeTimeout | OutcomeLLMError
+	Reason string // truncation reason or error text; "" when completed
+}
+
+const (
+	OutcomeCompleted = "completed" // explicit task_done
+	OutcomeTruncated = "truncated" // ended without task_done (rounds / empty rounds / compression)
+	OutcomeTimeout   = "timeout"   // ctx deadline exceeded
+	OutcomeLLMError  = "llm_error" // a completion call failed terminally
+)
+
 // Deps bundles all per-call dependencies the Runner needs. Both
 // internal/agent (diff review) and internal/scan (full-file scan) build a
 // Deps from their own state and hand it to NewRunner.
@@ -205,7 +221,7 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 // time or round budget is nearly exhausted (forcing a verdict while there is
 // still budget to say it), and any chain that still ends without task_done
 // records a unit_incomplete warning instead of returning silently.
-func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc session.Scope) error {
+func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc session.Scope) (Outcome, error) {
 	newPath := sc.Path() // representative path for logging / code_comment anchoring
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
@@ -219,7 +235,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc sess
 		case <-ctx.Done():
 			r.RecordWarning("unit_incomplete", newPath,
 				"review ended without task_done (deadline exceeded); verdict is partial — do not read as clean")
-			return ctx.Err()
+			return Outcome{State: OutcomeTimeout, Reason: "deadline exceeded"}, ctx.Err()
 		default:
 		}
 
@@ -256,7 +272,12 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc sess
 		if err != nil {
 			rec.SetError(err, duration)
 			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
-			return fmt.Errorf("LLM completion error: %w", err)
+			// A deadline hit mid-call surfaces as an LLM error; report it as the
+			// timeout it is so debriefs don't misclassify slow units as API failures.
+			if ctx.Err() != nil {
+				return Outcome{State: OutcomeTimeout, Reason: "deadline exceeded"}, fmt.Errorf("LLM completion error: %w", err)
+			}
+			return Outcome{State: OutcomeLLMError, Reason: err.Error()}, fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
 		r.recordModel(resp.Alias) // run-level model identity; counts every response, not just ones with findings
@@ -342,8 +363,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc sess
 		}
 		r.RecordWarning("unit_incomplete", newPath,
 			"review ended without task_done ("+truncateReason+"); verdict is partial — do not read as clean")
+		return Outcome{State: OutcomeTruncated, Reason: truncateReason}, nil
 	}
-	return nil
+	return Outcome{State: OutcomeCompleted}, nil
 }
 
 // executeToolCall dispatches a single tool call from the LLM response and

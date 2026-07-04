@@ -104,6 +104,7 @@ func runReview(args []string) error {
 		HistoryIndex:          historyIndex,
 		GitRunner:             cc.GitRunner,
 		Features:              features,
+		Version:               versionString(),
 	})
 
 	// Silence progress output during execution; restored before the trace
@@ -232,6 +233,7 @@ func runDryRun(cc *commonContext, opts reviewOptions) error {
 		SystemRule:   cc.Resolver,
 		Background:   opts.background,
 		Features:     features,
+		Version:      versionString(),
 	})
 
 	preview, units, repoMap, err := ag.DryRun(context.Background())
