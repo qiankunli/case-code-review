@@ -18,6 +18,16 @@ import (
 // don't pollute the real store.
 var sessionSubDir = "sessions"
 
+// schemaVersion stamps every session_start so longitudinal analysis survives
+// record-format changes. Bump when a record type's meaning changes (not for
+// additive fields). v2: debrief records + run manifest.
+const schemaVersion = 2
+
+// evalTagEnv lets a run tag its transcript with the population it belongs to
+// (fixed regression corpus vs rolling production) — the two aren't comparable,
+// and without a tag collect-time separation is guesswork.
+const evalTagEnv = "CCR_EVAL_TAG"
+
 // jsonlWriter streams session records to a JSONL file under
 // $HOME/.casecodereview/sessions/<encoded-repo-path>/<session-id>.jsonl.
 // It is safe for concurrent use by multiple goroutines.
@@ -31,6 +41,7 @@ type jsonlWriter struct {
 	diffFrom   string
 	diffTo     string
 	diffCommit string
+	opts       SessionOptions // manifest fields (features/version/params)
 	file       *os.File
 	writer     *bufio.Writer
 	lastUUID   string // tracks chain of records via parentUuid
@@ -47,6 +58,7 @@ func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOpt
 		diffFrom:   opts.DiffFrom,
 		diffTo:     opts.DiffTo,
 		diffCommit: opts.DiffCommit,
+		opts:       opts,
 	}
 	if err := jw.open(); err != nil {
 		return nil, err
@@ -145,14 +157,15 @@ func (jw *jsonlWriter) writeRecordLocked(rec map[string]any) {
 func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	uuid := generateUUID()
 	rec := map[string]any{
-		"uuid":       uuid,
-		"parentUuid": nil,
-		"type":       "session_start",
-		"sessionId":  jw.sessionID,
-		"timestamp":  startTime.UTC().Format(time.RFC3339),
-		"cwd":        jw.repoDir,
-		"gitBranch":  jw.gitBranch,
-		"model":      jw.model,
+		"uuid":           uuid,
+		"parentUuid":     nil,
+		"type":           "session_start",
+		"sessionId":      jw.sessionID,
+		"timestamp":      startTime.UTC().Format(time.RFC3339),
+		"schema_version": schemaVersion,
+		"cwd":            jw.repoDir,
+		"gitBranch":      jw.gitBranch,
+		"model":          jw.model,
 	}
 	if jw.reviewMode != "" {
 		rec["reviewMode"] = jw.reviewMode
@@ -165,6 +178,19 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	}
 	if jw.diffCommit != "" {
 		rec["diffCommit"] = jw.diffCommit
+	}
+	// Run manifest: configuration the metrics must join on / be conditioned on.
+	if jw.opts.ToolVersion != "" {
+		rec["tool_version"] = jw.opts.ToolVersion
+	}
+	if len(jw.opts.Features) > 0 {
+		rec["features"] = jw.opts.Features
+	}
+	if len(jw.opts.Params) > 0 {
+		rec["params"] = jw.opts.Params
+	}
+	if tag := os.Getenv(evalTagEnv); tag != "" {
+		rec["eval_tag"] = tag
 	}
 
 	jw.mu.Lock()
@@ -285,8 +311,67 @@ func (jw *jsonlWriter) WriteToolCall(ss *ScopeSession, taskType TaskType, toolNa
 	return uuid
 }
 
+// WriteDebrief writes a unit's terminal "debrief" record (see Debrief).
+// Empty optional groups are omitted so the record stays greppable and small.
+func (jw *jsonlWriter) WriteDebrief(ss *ScopeSession, d Debrief) string {
+	uuid := generateUUID()
+
+	jw.mu.Lock()
+	defer jw.mu.Unlock()
+	rec := map[string]any{
+		"uuid":        uuid,
+		"parentUuid":  jw.lastUUID,
+		"type":        "debrief",
+		"sessionId":   jw.sessionID,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		"outcome":     d.Outcome,
+		"formed":      d.Formed,
+		"fragments":   d.Fragments,
+		"insertions":  d.Insertions,
+		"deletions":   d.Deletions,
+		"usage_sites": d.UsageSites,
+		"rounds":      d.Rounds,
+		"duration_ms": d.DurationMs,
+		"tokens": map[string]int{
+			"prompt_tokens":      d.Tokens.PromptTokens,
+			"completion_tokens":  d.Tokens.CompletionTokens,
+			"cache_read_tokens":  d.Tokens.CacheReadTokens,
+			"cache_write_tokens": d.Tokens.CacheWriteTokens,
+		},
+	}
+	if d.Reason != "" {
+		rec["reason"] = d.Reason
+	}
+	if len(d.Degradations) > 0 {
+		rec["degradations"] = d.Degradations
+	}
+	if len(d.Clues) > 0 {
+		rec["clues"] = d.Clues
+	}
+	if len(d.ClueRefs) > 0 {
+		rec["clue_refs"] = d.ClueRefs
+	}
+	if len(d.Materials) > 0 {
+		rec["materials"] = d.Materials
+	}
+	if len(d.ToolCalls) > 0 {
+		rec["tool_calls"] = d.ToolCalls
+	}
+	addScopeFields(rec, ss)
+	jw.writeRecordLocked(rec)
+	jw.lastUUID = uuid
+	return uuid
+}
+
+// diffStats carries the reviewed diff's totals into the session_end record —
+// the denominators cost metrics normalize by.
+type diffStats struct {
+	files                 int
+	insertions, deletions int64
+}
+
 // WriteSessionEnd writes the final session_end summary record and closes the file.
-func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64) {
+func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, stats diffStats) {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -300,6 +385,11 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 		"files_reviewed":   filesReviewed,
 		"duration_seconds": duration.Seconds(),
 		"llm_failures":     llmFailures,
+	}
+	if stats.files > 0 {
+		rec["diff_files"] = stats.files
+		rec["diff_insertions"] = stats.insertions
+		rec["diff_deletions"] = stats.deletions
 	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid

@@ -133,6 +133,10 @@ type Args struct {
 	// means all defaults (full feature set) — so callers that don't set it are
 	// unaffected. Gates flow into unit splitting, clue finders, and review phases.
 	Features feature.Set
+
+	// Version is the ccr build identity ("v1.7.1 (dc030bd)"), stamped into the
+	// session manifest so transcripts self-describe which build produced them.
+	Version string
 }
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
@@ -194,6 +198,14 @@ func New(args Args) *Agent {
 			DiffFrom:   args.From,
 			DiffTo:     args.To,
 			DiffCommit: args.Commit,
+			// Run manifest: transcripts self-describe their configuration so eval
+			// joins on gates/version/knobs instead of guessing.
+			Features:    args.Features.Resolved(),
+			ToolVersion: args.Version,
+			Params: map[string]any{
+				"unit_watermark":       defaultUnitWatermark,
+				"preload_budget_bytes": preloadSourceBudget,
+			},
 		})
 	}
 	// Clue gates are applied here (finder assembly) rather than in findClues, so a
@@ -401,6 +413,8 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 		a.totalInsertions += d.Insertions
 		a.totalDeletions += d.Deletions
 	}
+	// Diff size lands in session_end — the denominator cost metrics normalize by.
+	a.session.SetDiffStats(len(parsed), a.totalInsertions, a.totalDeletions)
 
 	return nil
 }
@@ -779,7 +793,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	// Render this unit's found context (clues) into the prompt blocks.
 	specCases, specRules, seeAlso, priorFindings := renderClues(u.Dossier)
 	// Pre-grep where else the repo references the changed symbols ({{usage_sites}}).
-	usageSites := a.renderUsageSites(u)
+	usageSites, usageCount := a.renderUsageSites(u)
 	// Per-function @rule (from clues) augments the path-glob rule.json criteria;
 	// both flow into {{system_rule}} (plan + main).
 	rule := a.resolveSystemRule(strings.ToLower(newPath))
@@ -859,7 +873,22 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		return messages
 	}
 
-	unitSource, relatedSource := a.renderMaterials(ctx, a.brieferFor(u.Scope).materials(u))
+	unitSource, relatedSource, materialOutcomes := a.renderMaterials(ctx, a.brieferFor(u.Scope).materials(u))
+
+	// The debrief is this unit's terminal record: what only this moment knows
+	// (formation, briefing fate, outcome) — post-hoc analysis can't rebuild it.
+	// Cost rollup is filled by WriteDebrief from the scope's task records.
+	deb := session.Debrief{
+		Formed:     string(u.Formed),
+		Fragments:  len(u.Fragments),
+		Insertions: u.Insertions(),
+		Deletions:  u.Deletions(),
+		Clues:      countClues(u.Dossier),
+		ClueRefs:   clueRefs(u.Dossier),
+		Materials:  materialOutcomes,
+		UsageSites: usageCount,
+	}
+
 	messages := buildMessages(unitSource, relatedSource)
 	maxAllowed := a.args.Template.MaxTokens
 	tokenLimit := maxAllowed * 4 / 5 // 80% of MaxTokens
@@ -870,10 +899,12 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	if relatedSource != "" && llmloop.CountMessagesTokens(messages) > tokenLimit {
 		relatedSource = ""
 		messages = buildMessages(unitSource, relatedSource)
+		deb.Degradations = append(deb.Degradations, "related_source_dropped")
 	}
 	if unitSource != sourceNotPreloaded && llmloop.CountMessagesTokens(messages) > tokenLimit {
 		unitSource = sourceNotPreloaded
 		messages = buildMessages(unitSource, relatedSource)
+		deb.Degradations = append(deb.Degradations, "unit_source_dropped")
 	}
 
 	tokenCount := llmloop.CountMessagesTokens(messages)
@@ -885,13 +916,36 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 			telemetry.AnyToAttr("file.path", newPath),
 			telemetry.AnyToAttr("tokens", tokenCount),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
+		// A governor's decision, not a failure — the debrief must keep the two
+		// distinguishable (lowering the threshold shifts skips, not the fault rate).
+		deb.Outcome, deb.Reason = "skipped_policy", msg
+		a.session.WriteDebrief(sc, deb)
 		return nil
 	}
 
 	// REVIEW_FILTER_TASK is NOT run here: it is a file-level post-pass
 	// (runReviewFilters), so sibling Units of the same file don't filter each
 	// other's comments against the wrong diff slice.
-	return a.runner.RunPerFile(ctx, messages, sc)
+	outcome, err := a.runner.RunPerFile(ctx, messages, sc)
+	deb.Outcome, deb.Reason = outcome.State, outcome.Reason
+	a.session.WriteDebrief(sc, deb)
+	return err
+}
+
+// clueRefs collects the deduped symbol-ids a dossier points at, in dossier
+// order — the debrief keeps content, not just counts (coverage counts can stay
+// flat while every pointed-at symbol changes).
+func clueRefs(clues unit.Dossier) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range clues {
+		if c.Ref == "" || seen[c.Ref] {
+			continue
+		}
+		seen[c.Ref] = true
+		out = append(out, c.Ref)
+	}
+	return out
 }
 
 // fileReader unwraps the file_read tool's FileReader so the preload reads exactly

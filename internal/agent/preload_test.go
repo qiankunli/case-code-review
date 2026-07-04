@@ -38,7 +38,7 @@ func TestRenderMaterials_WholeFile(t *testing.T) {
 	a := newPreloadAgent(t, map[string]string{
 		"pkg/a.go": "package a\n\nfunc F() {}\n",
 	})
-	got, related := a.renderMaterials(context.Background(), []material{wholeFile("pkg/a.go")})
+	got, related, _ := a.renderMaterials(context.Background(), []material{wholeFile("pkg/a.go")})
 	// Mirrors file_read's numbered-line format so inline source and tool output
 	// look identical to the model.
 	if !strings.Contains(got, "File: pkg/a.go (Total lines: 3)") {
@@ -53,13 +53,13 @@ func TestRenderMaterials_WholeFile(t *testing.T) {
 
 	// A missing path is skipped; when nothing could be inlined the sentinel fills
 	// the placeholder instead of an empty block.
-	if got, _ := a.renderMaterials(context.Background(), []material{wholeFile("gone.go")}); got != sourceNotPreloaded {
+	if got, _, _ := a.renderMaterials(context.Background(), []material{wholeFile("gone.go")}); got != sourceNotPreloaded {
 		t.Fatalf("want sentinel for unreadable paths, got:\n%s", got)
 	}
 
 	// No file_read tool registered → sentinel (preload is best-effort only).
 	a3 := &Agent{args: Args{Tools: tool.NewRegistry()}}
-	if got, _ := a3.renderMaterials(context.Background(), nil); got != sourceNotPreloaded {
+	if got, _, _ := a3.renderMaterials(context.Background(), nil); got != sourceNotPreloaded {
 		t.Fatalf("want sentinel without FileReader, got: %s", got)
 	}
 }
@@ -69,12 +69,16 @@ func TestRenderMaterials_BudgetAndRangedFallback(t *testing.T) {
 	// failure of one file doesn't block a later small file.
 	big := strings.Repeat("x", preloadSourceBudget+1)
 	a := newPreloadAgent(t, map[string]string{"big.go": big, "small.go": "ok\n"})
-	got, _ := a.renderMaterials(context.Background(), []material{wholeFile("big.go"), wholeFile("small.go")})
+	got, _, outcomes := a.renderMaterials(context.Background(), []material{wholeFile("big.go"), wholeFile("small.go")})
 	if strings.Contains(got, big[:64]) {
 		t.Fatal("oversized file must not be inlined")
 	}
 	if !strings.Contains(got, "exceeds the preload budget") || !strings.Contains(got, "1|ok") {
 		t.Fatalf("want budget note + small file inlined, got:\n%s", got[:200])
+	}
+	// Each material's fate is reported for the unit's debrief.
+	if len(outcomes) != 2 || outcomes[0] != "budget_miss big.go" || outcomes[1] != "whole small.go" {
+		t.Fatalf("material outcomes off: %v", outcomes)
 	}
 
 	// With symbols, an over-budget file falls back to just those functions' bodies
@@ -87,7 +91,7 @@ func TestRenderMaterials_BudgetAndRangedFallback(t *testing.T) {
 	}
 	sb.WriteString("\nfunc Changed() int {\n\treturn 42\n}\n")
 	a2 := newPreloadAgent(t, map[string]string{"big.go": sb.String()})
-	got2, _ := a2.renderMaterials(context.Background(), []material{wholeFile("big.go", "big.go::Changed")})
+	got2, _, _ := a2.renderMaterials(context.Background(), []material{wholeFile("big.go", "big.go::Changed")})
 	if !strings.Contains(got2, "LINE_RANGE: ") || !strings.Contains(got2, "func Changed() int {") {
 		t.Fatalf("want ranged fallback with the changed function's body, got:\n%.300s", got2)
 	}
@@ -97,7 +101,7 @@ func TestRenderMaterials_BudgetAndRangedFallback(t *testing.T) {
 
 	// Same file, ranged_preload off → back to the named-but-not-inlined note.
 	a2.features = feature.Set{feature.RangedPreload: false}
-	got3, _ := a2.renderMaterials(context.Background(), []material{wholeFile("big.go", "big.go::Changed")})
+	got3, _, _ := a2.renderMaterials(context.Background(), []material{wholeFile("big.go", "big.go::Changed")})
 	if !strings.Contains(got3, "exceeds the preload budget") || strings.Contains(got3, "LINE_RANGE") {
 		t.Fatalf("gate off must disable the ranged fallback, got:\n%.300s", got3)
 	}
@@ -112,7 +116,7 @@ func TestRenderMaterials_RelatedBodiesSplitAndPriority(t *testing.T) {
 		wholeFile("own.go", "own.go::Changed"),
 		{path: "neighbor.go", symbols: []string{"neighbor.go::Caller"}, label: "caller neighbor.go::Caller", prio: 1},
 	}
-	unitSource, related := a.renderMaterials(context.Background(), mats)
+	unitSource, related, _ := a.renderMaterials(context.Background(), mats)
 	if !strings.Contains(unitSource, "File: own.go") || strings.Contains(unitSource, "neighbor.go") {
 		t.Fatalf("own source block polluted:\n%s", unitSource)
 	}

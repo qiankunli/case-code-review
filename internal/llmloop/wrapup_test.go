@@ -83,8 +83,12 @@ func TestWrapUp_DeadlineForcesVerdictTurn(t *testing.T) {
 	// before the FIRST round.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := r.RunPerFile(ctx, []llm.Message{llm.NewTextMessage("user", "review this")}, scope()); err != nil {
+	outcome, err := r.RunPerFile(ctx, []llm.Message{llm.NewTextMessage("user", "review this")}, scope())
+	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
+	}
+	if outcome.State != OutcomeCompleted {
+		t.Errorf("outcome = %+v, want completed", outcome)
 	}
 	if len(client.requests) != 1 {
 		t.Fatalf("expected 1 round, got %d", len(client.requests))
@@ -107,8 +111,12 @@ func TestWrapUp_RoundBudgetForcesVerdictTurn(t *testing.T) {
 	}}
 	r := newWrapUpRunner(client, 4)
 
-	if err := r.RunPerFile(context.Background(), []llm.Message{llm.NewTextMessage("user", "review this")}, scope()); err != nil {
+	outcome, err := r.RunPerFile(context.Background(), []llm.Message{llm.NewTextMessage("user", "review this")}, scope())
+	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
+	}
+	if outcome.State != OutcomeCompleted {
+		t.Errorf("outcome = %+v, want completed", outcome)
 	}
 	if len(client.requests) != 3 {
 		t.Fatalf("expected 3 rounds, got %d", len(client.requests))
@@ -132,8 +140,12 @@ func TestWrapUp_NoTaskDoneRecordsIncomplete(t *testing.T) {
 	}}
 	r := newWrapUpRunner(client, 3)
 
-	if err := r.RunPerFile(context.Background(), []llm.Message{llm.NewTextMessage("user", "review this")}, scope()); err != nil {
+	outcome, err := r.RunPerFile(context.Background(), []llm.Message{llm.NewTextMessage("user", "review this")}, scope())
+	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
+	}
+	if outcome.State != OutcomeTruncated || !strings.Contains(outcome.Reason, "tool-round budget exhausted") {
+		t.Errorf("outcome = %+v, want truncated (tool-round budget exhausted)", outcome)
 	}
 	found := false
 	for _, w := range r.Warnings() {

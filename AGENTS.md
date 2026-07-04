@@ -27,7 +27,7 @@ case-code-review/
     ├── spec/       ★ 消费 spec.json：SpecFinder/RuleFinder/LinkFinder 把 spec/case/rule/link 找成 Clue（廉价 finder）
     ├── history/    ★ 消费 --history（上轮评审 findings，symbol-id keyed）：Finder 挂成 ClueHistory，渲染成"核验是否已修"的 prompt（廉价 finder；评审反馈闭环的消费侧）
     ├── callgraph/  ★ caller/callee 邻域上下文（昂贵 finder）：CallerFinder（上溯 governing spec）/ CalleeFinder（下探依赖契约），共享有界 walk（深度 2、每分支停在最近带 spec 的邻居），git grep + go/ast / python3，Go+Python
-    ├── agent/      ★ 评审编排：split→找 Clue（廉价 + 按预算闸门的昂贵 finder）→merge→每 review unit 一个 loop；按 Clue 渲染上下文；unit 的 Briefing（briefer 协议按 scope 定预载材料：own source / usage-sites / callchain 邻居函数体，共享预算引擎）；file 级 review-filter；`--dry-run` 只装配上下文、不调 LLM
+    ├── agent/      ★ 评审编排：split→找 Clue（廉价 + 按预算闸门的昂贵 finder）→merge→每 review unit 一个 loop；按 Clue 渲染上下文；unit 的 Briefing（briefer 协议按 scope 定预载材料：own source / usage-sites / callchain 邻居函数体，共享预算引擎）；loop 收尾每 unit 落一条 **Debrief**（outcome/formed/降级/成本 → session，指标体系的常开采集面，见 `eval/README.md` §8）；file 级 review-filter；`--dry-run` 只装配上下文、不调 LLM
     ├── diff/       diff/hunk 解析、评论行号解析
     ├── llmloop/    agentic 评审 loop（复用 ocr 引擎）
     ├── config/     模板 prompt、rule.json、tools 配置

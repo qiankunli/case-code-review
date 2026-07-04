@@ -25,8 +25,23 @@ const (
 	// ScopeFunc is a single function's change.
 	ScopeFunc Scope = "func"
 	// ScopeCallChain groups call-adjacent changed functions (may span files).
-	// Reserved for the call-graph merger; not emitted yet.
 	ScopeCallChain Scope = "callchain"
+)
+
+// Formation is WHY a Unit has its shape — set by its constructor, recorded in
+// the unit's debrief. Scope says what the unit IS; Formation distinguishes what
+// Scope can't: a "file" unit that is naturally whole-file (residual /
+// unparseable) vs one the cost governor COALESCED from function fragments.
+// That distinction feeds the granularity dashboard's too-coarse signal
+// (coalesced units delivering clean verdicts) and is not recoverable after
+// the fact.
+type Formation string
+
+const (
+	FormedFunc     Formation = "func"     // a lone function fragment
+	FormedFile     Formation = "file"     // whole-file fragment: residual / unparseable / multi-symbol
+	FormedCoalesce Formation = "coalesce" // cost governor merged a file's fragments
+	FormedChain    Formation = "chain"    // call-adjacent changed functions grouped semantically
 )
 
 // Fragment is the atom: one file's changed region. Symbols are the symbol-ids
@@ -50,6 +65,8 @@ type Unit struct {
 	ID string
 	// Scope is how this Unit's Fragments were grouped.
 	Scope Scope
+	// Formed is why the Unit has that shape (see Formation).
+	Formed Formation
 	// Fragments are the changed regions reviewed together (one for a function or
 	// file Unit; several across files for a call-chain Unit).
 	Fragments []Fragment
@@ -148,9 +165,9 @@ func (FileSplitter) Split(d model.Diff) ([]Fragment, error) {
 // exactly one function (ID "<path>#<symbol>"), else ScopeFile (ID the path).
 func UnitOf(f Fragment) Unit {
 	if len(f.Symbols) == 1 {
-		return Unit{ID: f.Path + "#" + symbolName(f.Symbols[0]), Scope: ScopeFunc, Fragments: []Fragment{f}}
+		return Unit{ID: f.Path + "#" + symbolName(f.Symbols[0]), Scope: ScopeFunc, Formed: FormedFunc, Fragments: []Fragment{f}}
 	}
-	return Unit{ID: f.Path, Scope: ScopeFile, Fragments: []Fragment{f}}
+	return Unit{ID: f.Path, Scope: ScopeFile, Formed: FormedFile, Fragments: []Fragment{f}}
 }
 
 // CoalesceFile merges a file's Fragments into one ScopeFile Unit reviewing the
@@ -161,7 +178,7 @@ func CoalesceFile(d model.Diff, frags []Fragment) Unit {
 	for _, f := range frags {
 		whole.Symbols = append(whole.Symbols, f.Symbols...)
 	}
-	return Unit{ID: d.NewPath, Scope: ScopeFile, Fragments: []Fragment{whole}}
+	return Unit{ID: d.NewPath, Scope: ScopeFile, Formed: FormedCoalesce, Fragments: []Fragment{whole}}
 }
 
 // NewChainUnit groups call-adjacent changed functions (possibly across files)
@@ -175,7 +192,7 @@ func NewChainUnit(frags []Fragment) Unit {
 			names = append(names, symbolName(s))
 		}
 	}
-	return Unit{ID: "chain:" + strings.Join(names, "+"), Scope: ScopeCallChain, Fragments: frags}
+	return Unit{ID: "chain:" + strings.Join(names, "+"), Scope: ScopeCallChain, Formed: FormedChain, Fragments: frags}
 }
 
 // symbolName returns the bare symbol from a symbol-id ("p/x.go::Svc.Get" -> "Svc.Get")

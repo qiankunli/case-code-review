@@ -48,6 +48,22 @@ type SessionHistory struct {
 	persist     *jsonlWriter
 	Scopes      map[string]*ScopeSession
 	llmFailures int64
+	// diff totals for the session_end record (cost normalization denominators);
+	// set once diffs are loaded via SetDiffStats.
+	diffFiles      int
+	diffInsertions int64
+	diffDeletions  int64
+}
+
+// SetDiffStats records the reviewed diff's size once it is known (after diff
+// loading — later than session_start), for the session_end record. Metric
+// slicing by change size depends on it.
+func (sh *SessionHistory) SetDiffStats(files int, insertions, deletions int64) {
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	sh.diffFiles = files
+	sh.diffInsertions = insertions
+	sh.diffDeletions = deletions
 }
 
 // ScopeSession holds the conversation records for one review scope: a Unit
@@ -120,12 +136,22 @@ type ToolResultRecord struct {
 	Result    string
 }
 
-// SessionOptions holds optional metadata for a new session.
+// SessionOptions holds optional metadata for a new session. The manifest
+// fields (Features/ToolVersion/Params) make every transcript self-describe its
+// configuration — eval joins on them instead of guessing which gates a run had.
 type SessionOptions struct {
 	ReviewMode string
 	DiffFrom   string
 	DiffTo     string
 	DiffCommit string
+
+	// Features is the resolved feature-gate map (feature.Set.Resolved()).
+	Features map[string]bool
+	// ToolVersion identifies the ccr build ("v1.7.1 (dc030bd)").
+	ToolVersion string
+	// Params are the run's governing knobs (unit watermark, preload budget…) —
+	// the confounders a metric trend must be conditioned on.
+	Params map[string]any
 }
 
 // New creates a new SessionHistory with the given repo directory.
@@ -196,10 +222,11 @@ func (sh *SessionHistory) Finalize() {
 		}
 	}
 	failures := atomic.LoadInt64(&sh.llmFailures)
+	stats := diffStats{files: sh.diffFiles, insertions: sh.diffInsertions, deletions: sh.diffDeletions}
 	sh.mu.Unlock()
 
 	if p != nil {
-		p.WriteSessionEnd(duration, filesReviewed, failures)
+		p.WriteSessionEnd(duration, filesReviewed, failures, stats)
 	}
 }
 
