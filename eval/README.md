@@ -11,6 +11,8 @@
 
 两轴独立评：一单 review 可以又准又慢（质量高效率低），也可以快而空转（低成本交付 clean 但漏报）。合并成单一分数会把这两种病症混在一起。
 
+对应 AGENTS.md「三追求 × 三抓手」的三追求：质量轴 = 准确性，效率轴 = 成本；第三追求**健壮性**（loop 真跑完）由 §3 的截断/超时/未收尾信号观测——wrap-up 上线后优先直读 `unit_incomplete` warning。
+
 ## 流程
 
 ```
@@ -85,6 +87,19 @@
 - **空搜索 32/53（60%）→ 0/25**；code_search 次数减半，总 tool call 降 1/3，prompt token 净降 10%。suggestion 一次未触发——L1 在源头消灭了瞎猜，L0 退化为保险网（预期分工）。
 - typed graph 的 dry-run A/B（零 LLM）：`Shell.Run` 邻域 grep 模式 8 个符号 5 个错（同名撞车+测试函数），typed 模式精确 3 个——契约上溯基线从碰运气变权威。
 - 方法论验证：**基线（量化病灶）→ 治理 → 同工作负载复测**，单日闭环；n=1 的波动性 caveat 记录在案。
+
+### 7. 第二轮治理：trajectory 统计驱动 briefing 预载（2026-07-03）
+
+方法论增量：不止"读单链症状"（§3），还可以**跨 session 聚合 tool call、按 unit scope 分桶、抽样查询内容归类**，直接回答"剩余成本花在哪"，再让数据替直觉排优先级。
+
+- **统计口径**：扫 `~/.casecodereview/sessions/` 全部 main_task 链，按 scope（func/file/callchain）统计每 unit 的 tool 频次；file_read 再按"读自己的文件 vs 别的文件 × 整读 vs 区间读"四分；code_search 抽样看查询串归类。
+- **发现**（source-preload #67 上线后 ~340 unit）：
+  - code_search 是剩余大头（file 单元 4.1 次/unit），抽样归类后大多是**改动符号的使用点扫描**（callers/字面量引用），且常一次改动拆成多连搜；
+  - **直觉被数据反转**：优化最初瞄准 callchain 特化，但 callchain 只占 unit 的 4% 且已是搜索最少的 scope——最大蛋糕是 type-agnostic 的 usage 扫描；
+  - 预载 budget miss 仅 7%，但集中在恰好最核心的大文件上（`agent.go` 等），miss 单元贡献了大量文件内搜索；
+  - 前后对照要**分桶看**：预载对整读有效（own/full 0.47→0.12 次/unit），对区间读几乎无效（own/ranged 不降）——"上线了"不等于"每个症状都治了"。
+- **落地**：PR #86（usage-sites 预 grep / 大文件 ranged 降级 / callchain 邻居函数体，三个独立 gate）；设计见 `docs/context-model.md` 关键设计 8。
+- **复测待做**：gate 消融（`usage_sites/ranged_preload/neighbor_source` leave-one-out）+ 同工作负载重放（§2.5），看 code_search 次数与空搜率的边际变化。
 
 ## References
 

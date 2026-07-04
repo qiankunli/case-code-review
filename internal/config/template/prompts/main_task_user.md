@@ -16,6 +16,13 @@
 {{unit_source}}
 </current_file_source>
 
+// Bodies of functions related to this change (callers/callees outside the reviewed
+// file(s)), pre-fetched for context. They are NOT under review — do not comment on
+// them, and do NOT re-fetch these exact ranges.
+<related_source>
+{{related_source}}
+</related_source>
+
 Current time in the real world: {{current_system_date_time}}
 
 <user_task>
@@ -37,6 +44,10 @@ Findings a previous review raised on these function(s). For each, check whether 
 ### Repo Symbol Map (Optional)
 Symbols that actually exist in this repository, ranked by relevance to this change. When searching or reading other code, use these exact names — do not invent or guess identifier names; if a name you expected is not listed, search a fragment of it rather than the full guess. If empty, no map was built.
 {{repo_map}}
+
+### Usage Sites of Changed Symbols (Optional)
+Everywhere else in the repository the changed function(s) are referenced, as pre-run `git grep` results (`path:line: text`). This is your blast-radius map — judge from it whether each usage still holds after this change instead of searching for callers yourself; fetch surrounding code only where a usage looks affected. If empty, no other references were found.
+{{usage_sites}}
 
 ### Review Checklist
 {{system_rule}}

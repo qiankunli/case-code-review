@@ -12,6 +12,8 @@ A diff alone is too little to review well — it can't tell whether a change bre
 
 The payoff: ccr finds the bugs that need background — a change quietly breaking a caller's assumption, or violating an invariant the diff doesn't show — checklist-checked against the function's real contract. (Syntax stays lint's job.)
 
+Review quality is judged on three goals that pull against each other — **robustness, accuracy, cost** — pursued through three levers all centered on the review loop: its capability, its granularity, and its context. See `AGENTS.md` for the full frame.
+
 ## The context model: evidence kinds × relations
 
 For each review unit, ccr assembles a dossier of *clues*. A clue is one piece of evidence of a **kind**, reached along a **relation** — two orthogonal axes (see `docs/context-model.md`):
