@@ -43,13 +43,20 @@
 - pre-existing 问题不算本单漏报（diff 没碰它）；
 - "clean 且确实无问题"是合格结论，不因交付 0 条扣分——要区分"正确的沉默"和"空转的沉默"。
 
+### 2.5 复测操作法（treatment 后怎么再测）
+
+- **同工作负载重放**：历史 PR 用 merge commit 的双亲重建评审范围——`ccr review --from <merge>^1 --to <merge>^2`。分支已合并时 merge-base 会退化成分支自身，必须用 merge 双亲。
+- **组合效果 vs 单项归因**：多个治理项同时上线时，端到端复测只能给**组合**效果；某一项"零触发/零变化"不等于没用（实例：repo_map 在源头消灭瞎猜后，search-suggest 一次都没触发——它退化成保险网，不是失效）。单项归因一律走 feature gate 消融（`--feature x=off` 的 dry-run json 或真跑）。
+- **引擎类改动比内容不比计数**：换解析引擎（如 grep→typed graph）时 coverage 计数往往不变，变的是 clue **指向哪些符号**——从 dry-run json 的 `spec_cases`/`see_also` 文本抽 symbol-id 集合做对比，噪声符号（同名撞车、测试函数混入）一眼可见。
+- **自举信号**：ccr review 自己的改动 PR，其 findings 是免费的质量样本——它抓过自己代码里的死 API 和仓库惯例违例；被评估工具评估自己，既是 dogfood 也是回归观测。
+
 ### 3. objective 信号怎么读（症状 → 病因方向）
 
 | 信号 | 阈值感 | 指向 |
 |---|---|---|
 | empty_searches / code_search 比例高 | 整体 >1/3 就不正常 | agent 在猜符号名——上下文没给够（clue 缺口）或 search 工具描述/语义不清 |
 | repeated_reads（同文件读 ≥2 次） | 链内出现即可疑 | prompt 已注入的内容没被利用，或 memory compression 把它丢了 |
-| 长链无 task_done（500s+ 截断） | 出现即问题 | 撞 ConcurrentTaskTimeout / 轮数预算；这条链的结论不可信（可能没评完） |
+| 长链无 task_done（500s+ 截断） | 出现即问题 | 撞 ConcurrentTaskTimeout / 轮数预算；这条链的结论不可信（可能没评完）。wrap-up 上线后 ccr 会自打 `unit_incomplete` warning——**优先直读 warnings**，trajectory 推断只作交叉验证 |
 | 琐碎链（≤2 tools 直接 task_done） | 数量多则粒度问题 | unit 切得过细，或该 unit 本不值得独立 loop（成本 ≈ 一次全托确认） |
 | 产 comment 链占比 | 参考值见基线 | 绝大部分 loop 花在"确认无问题"上——保障价值 vs 成本的权衡入口 |
 
