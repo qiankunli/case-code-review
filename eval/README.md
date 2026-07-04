@@ -86,6 +86,19 @@
 - typed graph 的 dry-run A/B（零 LLM）：`Shell.Run` 邻域 grep 模式 8 个符号 5 个错（同名撞车+测试函数），typed 模式精确 3 个——契约上溯基线从碰运气变权威。
 - 方法论验证：**基线（量化病灶）→ 治理 → 同工作负载复测**，单日闭环；n=1 的波动性 caveat 记录在案。
 
+### 7. 第二轮治理：trajectory 统计驱动 briefing 预载（2026-07-03）
+
+方法论增量：不止"读单链症状"（§3），还可以**跨 session 聚合 tool call、按 unit scope 分桶、抽样查询内容归类**，直接回答"剩余成本花在哪"，再让数据替直觉排优先级。
+
+- **统计口径**：扫 `~/.casecodereview/sessions/` 全部 main_task 链，按 scope（func/file/callchain）统计每 unit 的 tool 频次；file_read 再按"读自己的文件 vs 别的文件 × 整读 vs 区间读"四分；code_search 抽样看查询串归类。
+- **发现**（source-preload #67 上线后 ~340 unit）：
+  - code_search 是剩余大头（file 单元 4.1 次/unit），抽样归类后大多是**改动符号的使用点扫描**（callers/字面量引用），且常一次改动拆成多连搜；
+  - **直觉被数据反转**：优化最初瞄准 callchain 特化，但 callchain 只占 unit 的 4% 且已是搜索最少的 scope——最大蛋糕是 type-agnostic 的 usage 扫描；
+  - 预载 budget miss 仅 7%，但集中在恰好最核心的大文件上（`agent.go` 等），miss 单元贡献了大量文件内搜索；
+  - 前后对照要**分桶看**：预载对整读有效（own/full 0.47→0.12 次/unit），对区间读几乎无效（own/ranged 不降）——"上线了"不等于"每个症状都治了"。
+- **落地**：PR #86（usage-sites 预 grep / 大文件 ranged 降级 / callchain 邻居函数体，三个独立 gate）；设计见 `docs/context-model.md` 关键设计 8。
+- **复测待做**：gate 消融（`usage_sites/ranged_preload/neighbor_source` leave-one-out）+ 同工作负载重放（§2.5），看 code_search 次数与空搜率的边际变化。
+
 ## References
 
 - ATIF 导出：`ccr export --format atif <session.jsonl>`（session 落盘位置见 `internal/session/`）
