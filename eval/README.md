@@ -112,6 +112,7 @@
   - context → `clues`（relation×kind 计数）+ `clue_refs`（symbol-id 列表，比内容不比计数）+ `materials` 逐条结局 + `usage_sites` 条数；
   - 成本 → rounds/tool_calls/tokens（cache 拆开）/duration，从 scope 的 llm 记录聚合，eval 不用再手写统计脚本。
 - **Finding**（每条最终交付的 finding 一条记录，过滤后写；transcript 里的 code_comment tool call 是过滤前的，会多算）：`fingerprint`（path+content 的短 hash，**刻意不含行号**——relocation 和后续编辑会挪行，指纹的职责是让复跑复现的同一 finding join 到同一人工标注）+ `symbol_id` + 行区间；配 manifest 的 `git_head` 锚点，后验扫描从这里向前走 git 历史（"后续 commit 是否改了 finding 指过的行/符号" → important 实锤 / 漏报候选）。
+- **后验扫描脚本**：`eval/posterior.py <session.jsonl|dir> [--labels out.jsonl]`——按锚点（diffCommit > diffTo > git_head）对每条 finding 走 git line-log，判 `line_touched`（实锤候选，附 commit）/ `file_touched` / `untouched`；候选仍需人工对照 commit 与 finding 文本确认（§2 判定纪律）。首次自验：dogfood session 的两条 os.Stderr finding 精确指回修它们的 commit。
 
 ## References
 
