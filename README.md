@@ -12,6 +12,22 @@ A diff alone is too little to review well — it can't tell whether a change bre
 
 The payoff: ccr finds the bugs that need background — a change quietly breaking a caller's assumption, or violating an invariant the diff doesn't show — checklist-checked against the function's real contract. (Syntax stays lint's job.)
 
+## Goals and levers
+
+Three goals define a good review — they pull against each other, so none can be optimized alone:
+
+1. **Robustness** — every unit's loop actually finishes: a big file isn't skipped by the budget, a long chain isn't cut off by a timeout. Truncated silence is the most dangerous failure because it looks like "no problems".
+2. **Accuracy** — real problems get found: no idling to a clean verdict, no fabricated findings.
+3. **Cost** — time and tokens stay bounded: a review that can't keep up with the pace of development gets bypassed no matter how accurate it is.
+
+Every lever centers on the **review loop**:
+
+1. **The loop's own capability**: its tool surface (search / file reads / call graph) and memory mechanics (compression, timeout wrap-up).
+2. **The loop's granularity**: file → unit, aligned with how changes actually happen — one change is usually one requirement plus its related files, and the review scope should match it (the function → call-chain → file merge ladder).
+3. **The loop's context**, in two classes: what ccr **captures itself** (on-the-fly function boundaries, usage greps, call-graph neighborhoods, source-doc extraction), which aims for zero adoption cost; and what is **fed in from outside** (authored spec/case/rule/link, prior-review history, requirement background), which aims for high signal.
+
+Measurement maps to `eval/README.md`: the quality axis tests accuracy, the efficiency axis tests cost, and the truncation/timeout/unfinished-chain signals test robustness.
+
 ## The context model: evidence kinds × relations
 
 For each review unit, ccr assembles a dossier of *clues*. A clue is one piece of evidence of a **kind**, reached along a **relation** — two orthogonal axes (see `docs/context-model.md`):
