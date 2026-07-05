@@ -1,6 +1,7 @@
 package session
 
 import (
+	"os"
 	"time"
 
 	"testing"
@@ -36,7 +37,7 @@ func TestWriteDebrief(t *testing.T) {
 	mk(MainTask, "task_done")
 	mk(PlanTask, "")
 
-	sh.WriteDebrief(sc, Debrief{
+	sh.CloseScope(sc, Debrief{
 		Outcome:      "completed",
 		Formed:       "func",
 		Fragments:    1,
@@ -141,4 +142,66 @@ func TestWriteFindings(t *testing.T) {
 	if _, ok := findings[1]["symbol_id"]; ok {
 		t.Fatalf("empty symbol_id must be omitted: %v", findings[1])
 	}
+}
+
+func TestScopeLifecycle(t *testing.T) {
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{})
+	sc := Scope{ID: "a.go#F", Kind: "unit", Type: "func", Paths: []string{"a.go"}}
+	ss := sh.GetOrCreateScope(sc)
+
+	// Async work in flight: Close parks the debrief instead of persisting.
+	ss.BeginAsync()
+	ss.Close(Debrief{Outcome: "completed", Formed: "func"})
+	sh2 := readTypes(t, repoDir, sh.SessionID)
+	if sh2["debrief"] != 0 {
+		t.Fatal("debrief must be parked while async work is in flight")
+	}
+
+	// The last async task out finalizes: relocation-style record added by the
+	// worker is INSIDE the rollup.
+	rec := &TaskRecord{Type: ReLocationTask, scopeSession: ss, Duration: time.Second,
+		Response: &ResponseRecord{Usage: &TokenUsage{PromptTokens: 7}}}
+	ss.TaskRecords[ReLocationTask] = append(ss.TaskRecords[ReLocationTask], rec)
+	ss.EndAsync()
+
+	sh.Finalize()
+	var deb map[string]any
+	for _, r := range readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID)) {
+		if r["type"] == "debrief" {
+			deb = r
+		}
+	}
+	if deb == nil {
+		t.Fatal("debrief must persist once the last async task ends")
+	}
+	if deb["outcome"] != "completed" || deb["rounds"].(map[string]any)["re_location_task"].(float64) != 1 {
+		t.Fatalf("parked debrief must include the async round: %v", deb)
+	}
+
+	// Closed scope: late writes are kept but counted; double Close keeps first.
+	ss.AppendTaskRecord(MainTask, nil)
+	if ss.LateWrites() != 1 {
+		t.Fatalf("late write not detected: %d", ss.LateWrites())
+	}
+	ss.Close(Debrief{Outcome: "other"})
+	if ss.state != scopeClosed {
+		t.Fatal("second Close must not reopen")
+	}
+}
+
+// readTypes counts record types in the session file so far (flushing first).
+func readTypes(t *testing.T, repoDir, sessionID string) map[string]int {
+	t.Helper()
+	sh := map[string]int{}
+	p := sessionJSONLPath(t, repoDir, sessionID)
+	if _, err := os.Stat(p); err != nil {
+		return sh
+	}
+	for _, r := range readJSONLRecords(t, p) {
+		if s, ok := r["type"].(string); ok {
+			sh[s]++
+		}
+	}
+	return sh
 }

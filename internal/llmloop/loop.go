@@ -480,7 +480,13 @@ func (r *Runner) executeToolCall(ctx context.Context, sc session.Scope, call llm
 			pool := r.deps.CommentWorkerPool
 			asyncCtx := context.WithoutCancel(ctx)
 			toolName := t.Name()
+			// Register with the scope's lifecycle BEFORE submitting: the async
+			// worker may append relocation records to this scope, so the scope
+			// must not finalize its debrief until this task ends.
+			ss := r.deps.Session.GetOrCreateScope(sc)
+			ss.BeginAsync()
 			pool.Submit(func() ([]model.LlmComment, error) {
+				defer ss.EndAsync()
 				resolveAndCollect(asyncCtx)
 				telemetry.PrintToolCallFinished(toolName, time.Since(startTime))
 				return []model.LlmComment{}, nil
