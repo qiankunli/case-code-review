@@ -114,6 +114,15 @@
 - **Finding**（每条最终交付的 finding 一条记录，过滤后写；transcript 里的 code_comment tool call 是过滤前的，会多算）：`fingerprint`（path+content 的短 hash，**刻意不含行号**——relocation 和后续编辑会挪行，指纹的职责是让复跑复现的同一 finding join 到同一人工标注）+ `symbol_id` + 行区间；配 manifest 的 `git_head` 锚点，后验扫描从这里向前走 git 历史（"后续 commit 是否改了 finding 指过的行/符号" → important 实锤 / 漏报候选）。
 - **后验扫描脚本**：`eval/posterior.py <session.jsonl|dir> [--labels out.jsonl]`——按锚点（diffCommit > diffTo > git_head）对每条 finding 走 git line-log，判 `line_touched`（实锤候选，附 commit）/ `file_touched` / `untouched`；候选仍需人工对照 commit 与 finding 文本确认（§2 判定纪律）。首次自验：dogfood session 的两条 os.Stderr finding 精确指回修它们的 commit。
 
+### 9. typed_briefing 翻转许可证（2026-07-05，replay.py 首次全量应用）
+
+`eval/replay.py` 对 ccr-self corpus（6 PR × base/typed × 2 runs，70 unit/arm）的判定：
+
+- **健壮性（决定性）**：timeout 截断 9 → 3（llm_error +1）；#93 最典型——base 5 个 timeout、typed 0。机理：预载成为 File 消息后参与 dedup/evict，context 压力下少跑 LLM 压缩、少撞 600s 墙。
+- **成本**：prompt token 6.23M → 6.02M（-3.3%，且 base 被 timeout 天花板低估）；rounds 473 vs 462，持平。冒烟那个 -61% 未复现——单小 commit 的偶然，再证 n=1 不可信。
+- **准确性**：finding 层噪声主导（同 arm 两 run 指纹零重合），无系统性回退证据；两 arm 各抓到一条 evict 家族真问题（base 抓到的快照竞态经人工核实为真 → 修复 PR，**回归集自审首次产出实锤 bug**）。
+- 方法论注：run 间 finding 零重合说明质量轴在小 corpus 上只能判"无回退"、不能判优劣——精细质量对比需要更大 corpus 或按 finding 家族聚合。
+
 ## References
 
 - ATIF 导出：`ccr export --format atif <session.jsonl>`（session 落盘位置见 `internal/session/`）

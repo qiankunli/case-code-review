@@ -38,9 +38,10 @@ const (
 	FileDedup      Gate = "file_dedup"      // stub earlier file_read results superseded by a later covering read
 	FileEvict      Gate = "file_evict"      // under token pressure, shed re-derivable file content before LLM compression
 
-	// TypedBriefing changes the PROMPT SHAPE (one big task message → task +
-	// per-file source messages) — default OFF until same-workload replay A/B
-	// confirms quality holds; flip in a follow-up with data.
+	// TypedBriefing: briefing preloads as per-file messages. Flipped ON by the
+	// corpus replay A/B (eval/README §9): timeouts 9→3 across 70 units/arm
+	// (robustness win via File dedup/evict covering preloads), cost flat, no
+	// quality regression evidence.
 	TypedBriefing Gate = "typed_briefing"
 )
 
@@ -73,7 +74,7 @@ var registry = map[Gate]def{
 	NeighborSource: {true, "callchain briefing: inline caller/callee neighbor bodies"},
 	FileDedup:      {true, "stub earlier file_read results superseded by a later covering read"},
 	FileEvict:      {true, "under token pressure, shed re-derivable file content before LLM compression"},
-	TypedBriefing:  {false, "briefing preloads as per-file messages (prompt-shape change; pending replay A/B)"},
+	TypedBriefing:  {true, "briefing preloads as per-file messages (File dedup/evict cover preloads)"},
 }
 
 // Set is a resolved gate configuration. nil is valid and means "all defaults".
