@@ -558,11 +558,10 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	}
 
 	for _, rs := range results {
-		wire := llm.NewToolResultMessage(rs.ToolCallID, rs.Result)
-		var m msg.Msg = msg.Raw{M: wire}
+		var m msg.Msg = msg.Raw{M: llm.NewToolResultMessage(rs.ToolCallID, rs.Result)}
 		// file_read results carry a path+range identity — keep it (typed File)
 		// so covered re-reads can be deduplicated below.
-		if f, ok := msg.FileFromToolResult(rs.Name, rs.Result, wire); ok {
+		if f, ok := msg.FileFromToolResult(rs.Name, rs.ToolCallID, rs.Result); ok {
 			m = f
 		}
 		*messages = append(*messages, m)

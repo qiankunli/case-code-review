@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/qiankunli/case-code-review/internal/llm"
 )
 
 func fileResult(path string, total, start, end int, body string) string {
@@ -16,7 +14,7 @@ func fileResult(path string, total, start, end int, body string) string {
 func mkFile(t *testing.T, path string, total, start, end int) *File {
 	t.Helper()
 	result := fileResult(path, total, start, end, "1|code\n")
-	f, ok := FileFromToolResult(FileReadToolName, result, llm.NewToolResultMessage("c1", result))
+	f, ok := FileFromToolResult(FileReadToolName, "c1", result)
 	if !ok {
 		t.Fatalf("expected promotion for %s", path)
 	}
@@ -29,10 +27,10 @@ func TestFileFromToolResult(t *testing.T) {
 		t.Fatalf("parsed identity off: %+v", f)
 	}
 	// Other tools and malformed results stay Raw.
-	if _, ok := FileFromToolResult("code_search", "hits", llm.Message{}); ok {
+	if _, ok := FileFromToolResult("code_search", "c1", "hits"); ok {
 		t.Fatal("non-file_read must not promote")
 	}
-	if _, ok := FileFromToolResult(FileReadToolName, `Error: file "x" not found`, llm.Message{}); ok {
+	if _, ok := FileFromToolResult(FileReadToolName, "c1", `Error: file "x" not found`); ok {
 		t.Fatal("error result must not promote")
 	}
 	// Lowering an un-stubbed File is the original wire message.
