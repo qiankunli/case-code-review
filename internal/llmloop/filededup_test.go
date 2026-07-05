@@ -136,3 +136,37 @@ func TestEvictFiles(t *testing.T) {
 		t.Fatal("must not evict under the limit")
 	}
 }
+
+// Regression: the async-compression snapshot must not share mutable *File
+// state with the live conversation — under -race, a shallow snapshot trips
+// when the main loop stubs a File while the background job lowers it.
+func TestAsyncCompressionSnapshotRace(t *testing.T) {
+	result := fmt.Sprintf("File: pkg/a.go (Total lines: 1)\nIS_TRUNCATED: false\nLINE_RANGE: 1-1\n%s", "1|x\n")
+	f, ok := msg.FileFromToolResult("file_read", "c1", result)
+	if !ok {
+		t.Fatal("promotion failed")
+	}
+	client := &scriptedClient{responses: []*llm.ChatResponse{{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Role: "assistant", Content: strPtr("summary")}}},
+	}}}
+	r := NewRunner(Deps{
+		LLMClient: client,
+		Template: template.Template{MaxTokens: 10000, MemoryCompressionTask: template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "compress: {{context}}"}},
+		}},
+		Session: session.New(".", "test", "m", session.SessionOptions{}),
+	})
+
+	messages := []msg.Msg{msg.Text("system", "s"), msg.Text("user", "task"), f}
+	r.triggerAsyncCompression(context.Background(), messages, scope())
+	f.Stub(msg.StubEvicted) // main loop keeps mutating while the job snapshots
+
+	r.compressionMu.Lock()
+	job := r.pendingJob
+	r.compressionMu.Unlock()
+	if job != nil {
+		<-job.done
+	}
+}
+
+func strPtr(s string) *string { return &s }

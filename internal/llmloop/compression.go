@@ -3,7 +3,6 @@ package llmloop
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -294,7 +293,14 @@ func (r *Runner) runCompression(ctx context.Context, msgs []msg.Msg, sc session.
 
 // triggerAsyncCompression kicks off a background compression job.
 func (r *Runner) triggerAsyncCompression(ctx context.Context, messages []msg.Msg, sc session.Scope) {
-	msgSnapshot := slices.Clone(messages)
+	// Freeze the snapshot by lowering it NOW: slices.Clone is shallow, and a
+	// shared *msg.File would race — this goroutine reading stubbed via Lower()
+	// against the main loop's dedup/evict writing it. Wrapping the lowered wire
+	// form removes the shared mutable state entirely; the background job
+	// summarizes the conversation as it looked at snapshot time, which is
+	// exactly a snapshot's contract (post-snapshot stubs don't need summarizing
+	// — tryApplyPendingCompression re-appends everything past snapshotLen).
+	msgSnapshot := msg.Wrap(msg.Lower(messages))
 
 	asyncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 
