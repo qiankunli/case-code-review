@@ -30,7 +30,7 @@ case-code-review/
     ├── agent/      ★ 评审编排：split→找 Clue（廉价 + 按预算闸门的昂贵 finder）→merge→每 review unit 一个 loop；按 Clue 渲染上下文；unit 的 Briefing（briefer 协议按 scope 定预载材料：own source / usage-sites / callchain 邻居函数体，共享预算引擎）；loop 收尾每 unit 落一条 **Debrief**（outcome/formed/降级/成本 → session，指标体系的常开采集面，见 `eval/README.md` §8）；file 级 review-filter；`--dry-run` 只装配上下文、不调 LLM
     ├── diff/       diff/hunk 解析、评论行号解析
     ├── msg/        review 领域消息模型：loop 货币 `[]msg.Msg`，wire 格式只在 lowering 边界出现——`docs/message-model.md`
-    ├── llmloop/    agentic 评审 loop（复用 ocr 引擎；会话货币为 msg.Msg，1:1 lowering 不变量）
+    ├── llmloop/    agentic 评审 loop（自 ocr 引擎独立演化：会话货币 msg.Msg + 1:1 lowering、wrap-up 截断纪律、file dedup/evict、Outcome 均为 ccr 侧新增——`docs/message-model.md`）
     ├── config/     模板 prompt、rule.json、tools 配置
     └── model · gitcmd · session · telemetry · tool · scan · viewer …   支撑模块
 ```
