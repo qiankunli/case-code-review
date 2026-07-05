@@ -7,9 +7,7 @@ func TestEnabled_Defaults(t *testing.T) {
 	// exist to turn things OFF for ablation). The only exceptions are
 	// explicitly experimental gates awaiting validation — keep this list short
 	// and deliberate: a gate landing here must say in its registry desc WHY.
-	experimental := map[Gate]bool{
-		TypedBriefing: true, // prompt-shape change pending replay A/B
-	}
+	experimental := map[Gate]bool{} // empty today; a gate lands here with a WHY and leaves with data
 	var s Set // nil = all defaults
 	for _, n := range Names() {
 		g := Gate(n)
