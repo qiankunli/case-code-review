@@ -57,6 +57,58 @@
 4. **产出走既有管道**：碰头会的 finding 同样过 review-filter、打指纹、落 `finding` 记录，posterior.py 无差别消费。
 5. **量测挂指标体系**：准确性侧看它对§4.2 类漏报的召回（固定回归集里有两个实锤案例可当验收样本：builder 版本 vs go.mod、健康端口错配）；成本侧它就是一个多出来的 unit（debrief 照落，`formed: conference`）；gate `cross_unit` 消融。
 
+## 关键设计（P3 案情板：turn 级形态，讨论中）
+
+从 harness loop 视角对齐（loop = `build_context → llm_call → tool_exec → compress`，一圈一 turn），最糙的群聊版本是：
+
+```python
+while condition:
+    inbox = board.pull(exclude=self)            # 其它 loop 的消息，注入为一条 user 侧 message
+    context = build_context(query, inbox)
+    llm_result = llm_call(context)
+    if llm_result.tool_calls:
+        tool_results = tool_exec(llm_result.tool_calls)
+        board.publish(scope=self.unit, intent=llm_result, result=tool_results)
+    else:
+        return llm_result.text
+```
+
+**这个形态修正了本文早先的一半反对意见**：发布/消费点寄生在本来就存在的 turn 边界上，不需要长驻 teammate 的空闲轮询——mailbox 模型的"轮询窗口不存在"批评对它失效；失效的只是那一半，交接衰减与协调失败的批评仍在。
+
+糙版四个问题（按严重度）：
+
+1. **token 账倒挂**：N 个 loop × 每 turn 广播原始 (intent+tool 结果)，每个 loop 为其它 N-1 个付 token（10 unit × 7 turn ≈ 每 loop 额外 60-70KB）——这正是业界 15× token 的来源；而跨 unit 精确重复实测仅 5.9%。
+2. **注意力污染**：大部分消息与本案无关，稀释 spec 核对，且冲击 Strict Focus（别的 unit 的代码进来后可能对非本 diff 发 finding）。
+3. **时序偏差**：turn 级通道天然传"过程"不传"结论"——快 loop 最有价值的收尾结论产生时，别的 loop 多半也接近结束；结论级收益归碰头会。
+4. **传染性误报 + 不可复现**：observation 被当 confirmed 引用（MAST 的 agent 间失调 36.9% 就在这类通道上）；注入使行为依赖并发时序，eval A/B 被调度噪声污染。
+
+活下来的三个约束——加上之后"群聊"收敛为**案情板的 turn 级形态**（按 symbol 索引的板面 + turn 边界按相关性拉取）：
+
+1. **摘要化**：播结论不播原始 tool 输出（result 放共享存储，按需取）；
+2. **定向路由**：按 symbols/paths 交集投递，群聊 → 定向抄送；
+3. **消息分级**：intent / observation / confirmed 三档，禁止把 observation 当事实引用。
+
+## 实现选型：gate + 单引擎接缝，不 fork（讨论中）
+
+若实现，**开 feature gate 改现有 loop，把改动收敛成一个极小接缝**；不做独立 loop 实现——"完全独立实现"是用最贵的方式跑一个最便宜的实验：
+
+1. **现有 loop 不止 7 行伪代码**：wrap-up 截断纪律、compression、session 落盘、token 记账、comment 管道（异步 relocation）、outcome/debrief 全挂在引擎上。fork 意味着每个后续修复改两遍（debrief 竞态修复即是先例），或者"抽共享核心"——抽完得到的就是接缝方案。
+2. **eval 方法论要求同引擎消融**：gate 的意义是 leave-one-out；群聊跑在另一套实现上，机制收益和实现差异混在一起无法归因（违反 §2.5"单项归因走 gate 消融"）。价值假设越存疑，对照越要干净。
+3. **仓库已用同一答案回答过三次**：plan / review-filter / relocation 都是"单引擎 + gate 控制的可选环节"，无一 fork。
+
+接缝形态（引擎从此不再为实验改动，迭代全在 Board 实现包里）：
+
+```go
+// llmloop.Deps 增加可选依赖；nil = 今天的行为，prompt 逐字节不变
+Board Board
+type Board interface {
+    Pull(sc session.Scope) []llm.Message   // turn 顶部
+    Publish(sc session.Scope, note Note)   // tool 执行后
+}
+```
+
+配套纪律：gate `group_chat` 默认**关**（实验特性，与"默认全开"惯例相反，registry 支持）；manifest 自描述；debrief 补 `messages_pulled/published` 计数（时序不可复现的归因依据）。**P1 碰头会不需要此接缝**——它是编排层的一个普通额外 loop，引擎零改动；P1 先行既避开引擎风险，也为"P3 值不值得开接缝"提供证据。
+
 ## References
 
 - 漏报证据与方法论：`eval/README.md` §4.2（跨文件一致性）、§7（数据驱动优先级）
