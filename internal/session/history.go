@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/llm"
-	"github.com/qiankunli/case-code-review/pkg/stdx/uuid"
+	"github.com/qiankunli/go-stdx/uuid"
 )
 
 // TaskType identifies the kind of LLM request within a file subtask.

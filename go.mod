@@ -10,6 +10,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/openai/openai-go/v3 v3.39.0
 	github.com/pkoukk/tiktoken-go v0.1.8
+	github.com/qiankunli/go-stdx v0.0.0-20260705064313-454ca5d685f5
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.43.0

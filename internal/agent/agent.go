@@ -31,7 +31,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/telemetry"
 	"github.com/qiankunli/case-code-review/internal/tool"
 	"github.com/qiankunli/case-code-review/internal/unit"
-	"github.com/qiankunli/case-code-review/pkg/stdx/slicesx"
+	"github.com/qiankunli/go-stdx/slicesx"
 )
 
 // AgentWarning is re-exported from llmloop for backwards compatibility with

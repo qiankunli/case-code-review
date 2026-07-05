@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qiankunli/case-code-review/pkg/stdx/uuid"
+	"github.com/qiankunli/go-stdx/uuid"
 )
 
 func TestEncodeRepoPath(t *testing.T) {
