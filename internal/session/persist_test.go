@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/qiankunli/go-stdx/uuid"
 )
 
 func TestEncodeRepoPath(t *testing.T) {
@@ -133,7 +135,7 @@ func sessionJSONLPath(t *testing.T, repoDir, sessionID string) string {
 
 func TestSetErrorIncrementsCounter(t *testing.T) {
 	sh := &SessionHistory{
-		SessionID: generateUUID(),
+		SessionID: uuid.V4(),
 		Scopes:    make(map[string]*ScopeSession),
 	}
 	fs := sh.GetOrCreateScope(Scope{ID: "test.go", Kind: "file", Type: "file", Paths: []string{"test.go"}})
@@ -201,7 +203,7 @@ func TestSessionFilePermissions(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 
 	repoDir := t.TempDir()
-	sessionID := generateUUID()
+	sessionID := uuid.V4()
 
 	jw, err := newJSONLWriter(sessionID, repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
 	if err != nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/llmloop"
 	"github.com/qiankunli/case-code-review/internal/model"
+	"github.com/qiankunli/case-code-review/internal/msg"
 	"github.com/qiankunli/case-code-review/internal/session"
 	"github.com/qiankunli/case-code-review/internal/stdout"
 	"github.com/qiankunli/case-code-review/internal/telemetry"
@@ -566,7 +567,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) error {
 
 	// Scan has no per-unit debrief (no diff units); the outcome is dropped and
 	// truncation still surfaces through the runner's unit_incomplete warnings.
-	_, err := a.runner.RunPerFile(ctx, messages, scanScope(it.Path))
+	_, err := a.runner.RunPerFile(ctx, msg.Wrap(messages), scanScope(it.Path))
 	return err
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/diff"
 	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/model"
+	"github.com/qiankunli/case-code-review/internal/msg"
 	"github.com/qiankunli/case-code-review/internal/session"
 	"github.com/qiankunli/case-code-review/internal/stdout"
 	"github.com/qiankunli/case-code-review/internal/telemetry"
@@ -69,6 +70,15 @@ type Deps struct {
 	// RelocationEnabled gates the LLM re-location sub-call (ablation feature gate).
 	// When false, an unresolved comment keeps its model-reported line (no extra LLM).
 	RelocationEnabled bool
+	// FileDedupEnabled gates file_read result deduplication (the file_dedup
+	// feature gate): a later read covering an earlier one stubs the earlier
+	// copy in place, so the model pays for file content once.
+	FileDedupEnabled bool
+	// FileEvictEnabled gates eviction of File messages under token pressure
+	// (the file_evict feature gate): before paying for an LLM compression
+	// pass, shed the re-derivable slice of the context — file content the
+	// model can always read again.
+	FileEvictEnabled bool
 	// DiffLookup is consulted by the code_comment tool path to resolve
 	// line numbers against the file's diff (or against full file content
 	// in scan mode — scan adapters return a synthetic Diff whose
@@ -214,6 +224,10 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 // task_done is called or limits are reached. Token usage and warnings
 // are aggregated on the Runner across all files.
 //
+// The conversation's currency is the review-domain []msg.Msg; the wire form
+// (llm.Message) exists only at the msg.Lower call sites — the API request,
+// the session record, and the compression prompt (see docs/message-model.md).
+//
 // Truncation discipline: a chain that ends WITHOUT task_done is a partial
 // verdict, and silence would read as "clean" downstream (measured on real
 // trajectories: the timed-out chains were exactly the big-PR blind spots).
@@ -221,7 +235,7 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 // time or round budget is nearly exhausted (forcing a verdict while there is
 // still budget to say it), and any chain that still ends without task_done
 // records a unit_incomplete warning instead of returning silently.
-func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc session.Scope) (Outcome, error) {
+func (r *Runner) RunPerFile(ctx context.Context, messages []msg.Msg, sc session.Scope) (Outcome, error) {
 	newPath := sc.Path() // representative path for logging / code_comment anchoring
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
@@ -247,24 +261,27 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc sess
 				if toolReqCount > wrapUpMaxRounds {
 					toolReqCount = wrapUpMaxRounds
 				}
-				messages = append(messages, llm.NewTextMessage("user", wrapUpPrompt))
+				messages = append(messages, msg.Text("user", wrapUpPrompt))
 				fmt.Fprintf(stdout.Writer(), "[ccr] Budget nearly exhausted for %s — forcing wrap-up (deadline)\n", newPath)
 			} else if toolReqCount == wrapUpRoundReserve {
 				wrapUpIssued = true
-				messages = append(messages, llm.NewTextMessage("user", wrapUpPrompt))
+				messages = append(messages, msg.Text("user", wrapUpPrompt))
 				fmt.Fprintf(stdout.Writer(), "[ccr] Budget nearly exhausted for %s — forcing wrap-up (rounds)\n", newPath)
 			}
 		}
 
 		toolReqCount--
 
+		// Lower once per round: the session record and the API call see the same
+		// wire form the model does.
+		wire := msg.Lower(messages)
 		fs := r.deps.Session.GetOrCreateScope(sc)
-		rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
+		rec := fs.AppendTaskRecord(session.MainTask, wire)
 		startTime := time.Now()
 
 		resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 			Model:     r.deps.Model,
-			Messages:  messages,
+			Messages:  wire,
 			Tools:     r.deps.MainToolDefs,
 			MaxTokens: r.deps.Template.MaxTokens,
 		})
@@ -296,9 +313,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, sc sess
 
 		if len(calls) == 0 {
 			fmt.Fprintf(stdout.Writer(), "[ccr] No tool calls parsed for %s, retrying...\n", newPath)
-			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
+			messages = append(messages, msg.Text("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
 			if content != "" {
-				messages = append(messages[:len(messages)-1], llm.NewTextMessage("assistant", content), messages[len(messages)-1])
+				messages = append(messages[:len(messages)-1], msg.Text("assistant", content), messages[len(messages)-1])
 			}
 			continue
 		}
@@ -463,7 +480,13 @@ func (r *Runner) executeToolCall(ctx context.Context, sc session.Scope, call llm
 			pool := r.deps.CommentWorkerPool
 			asyncCtx := context.WithoutCancel(ctx)
 			toolName := t.Name()
+			// Register with the scope's lifecycle BEFORE submitting: the async
+			// worker may append relocation records to this scope, so the scope
+			// must not finalize its debrief until this task ends.
+			ss := r.deps.Session.GetOrCreateScope(sc)
+			ss.BeginAsync()
 			pool.Submit(func() ([]model.LlmComment, error) {
+				defer ss.EndAsync()
 				resolveAndCollect(asyncCtx)
 				telemetry.PrintToolCallFinished(toolName, time.Since(startTime))
 				return []model.LlmComment{}, nil
@@ -505,19 +528,29 @@ func (r *Runner) executeToolCall(ctx context.Context, sc session.Scope, call llm
 // warning (80%) MaxTokens thresholds. Returns false when even after
 // synchronous compression the conversation is still over the warning
 // threshold — caller should stop the loop in that case.
-func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, sc session.Scope) bool {
+func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]msg.Msg, sc session.Scope) bool {
 	maxAllowed := r.deps.Template.MaxTokens
 	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
 	warnLimit := int(float64(maxAllowed) * tokenWarningThreshold)
 
 	r.tryApplyPendingCompression(messages)
 
-	tokenCount := CountMessagesTokens(*messages)
+	tokenCount := countMsgTokens(*messages)
 
+	// Over the warning threshold: shed re-derivable file content first (free,
+	// deterministic), and only summarize if that wasn't enough.
+	if tokenCount > warnLimit && r.deps.FileEvictEnabled {
+		if n := evictFiles(*messages, warnLimit); n > 0 {
+			telemetry.Event(ctx, "context.file_evict",
+				telemetry.AnyToAttr("file.path", sc.Path()),
+				telemetry.AnyToAttr("evicted", n))
+		}
+		tokenCount = countMsgTokens(*messages)
+	}
 	if tokenCount > warnLimit {
 		r.cancelPendingCompression()
 		*messages, _ = r.runCompression(ctx, *messages, sc)
-		tokenCount = CountMessagesTokens(*messages)
+		tokenCount = countMsgTokens(*messages)
 	}
 
 	if tokenCount > softLimit && r.pendingJob == nil {
@@ -525,22 +558,39 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	}
 
 	if len(toolCalls) > 0 {
-		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls))
+		*messages = append(*messages, msg.Raw{M: llm.NewToolCallMessage(assistantContent, toolCalls)})
 	} else if assistantContent != "" {
-		*messages = append(*messages, llm.NewTextMessage("assistant", assistantContent))
+		*messages = append(*messages, msg.Text("assistant", assistantContent))
 	}
 
 	for _, rs := range results {
-		*messages = append(*messages, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
+		var m msg.Msg = msg.Raw{M: llm.NewToolResultMessage(rs.ToolCallID, rs.Result)}
+		// file_read results carry a path+range identity — keep it (typed File)
+		// so covered re-reads can be deduplicated below.
+		if f, ok := msg.FileFromToolResult(rs.Name, rs.ToolCallID, rs.Result); ok {
+			m = f
+		}
+		*messages = append(*messages, m)
+	}
+	if r.deps.FileDedupEnabled {
+		if n := msg.DedupFiles(*messages); n > 0 {
+			telemetry.Event(ctx, "context.file_dedup",
+				telemetry.AnyToAttr("file.path", sc.Path()),
+				telemetry.AnyToAttr("stubbed", n))
+		}
 	}
 
-	finalCount := CountMessagesTokens(*messages)
+	finalCount := countMsgTokens(*messages)
+	if finalCount > warnLimit && r.deps.FileEvictEnabled {
+		evictFiles(*messages, warnLimit)
+		finalCount = countMsgTokens(*messages)
+	}
 	if finalCount > warnLimit {
 		r.cancelPendingCompression()
 		*messages, _ = r.runCompression(ctx, *messages, sc)
 	}
 
-	return CountMessagesTokens(*messages) < warnLimit
+	return countMsgTokens(*messages) < warnLimit
 }
 
 // lookupTool returns the provider for a given tool from the registry, or

@@ -8,6 +8,10 @@ import (
 
 	"github.com/qiankunli/case-code-review/internal/callgraph"
 	"github.com/qiankunli/case-code-review/internal/feature"
+	"github.com/qiankunli/case-code-review/internal/llm"
+	"github.com/qiankunli/case-code-review/internal/llmloop"
+	"github.com/qiankunli/case-code-review/internal/msg"
+	"github.com/qiankunli/case-code-review/internal/session"
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
@@ -125,14 +129,24 @@ const preloadSourceBudget = 32 * 1024
 // literal placeholder never leaks and the reviewer knows to fetch on demand.
 const sourceNotPreloaded = "(not preloaded — fetch what you need via file_read)"
 
-// renderMaterials reads and formats a briefer's materials under one shared byte
+// piece is one rendered briefing fragment — the shared engine's output,
+// assembled either into the classic template slots (one big user message) or
+// into per-file typed messages (typed_briefing). A piece with file identity is
+// inlined source; one without is an advisory note (budget-miss pointer).
+// text keeps the exact bytes the classic path would have written (including
+// the trailing blank-line separator) so classic assembly stays byte-identical.
+type piece struct {
+	prio            int
+	text            string
+	path            string // file identity; "" for advisory notes
+	start, end, tot int
+}
+
+// renderPieces reads and formats a briefer's materials under one shared byte
 // budget, filled in priority order (own source first — an over-budget aux
-// material is dropped silently, never at the essentials' expense). Output is
-// split by prio: unitSource (prio 0, the reviewed files — fills {{unit_source}})
-// and relatedSource (prio >0, context-only bodies — fills {{related_source}}),
-// because the two carry different review semantics (review this vs. don't).
-// outcomes records each material's fate ("whole p" / "ranged p" / "budget_miss
-// p" / "dropped label" / "unreadable p") for the unit's debrief.
+// material is dropped silently, never at the essentials' expense). outcomes
+// records each material's fate ("whole p" / "ranged p" / "budget_miss p" /
+// "dropped label" / "unreadable p") for the unit's debrief.
 //
 // Reads go through the file_read tool's own FileReader (mode-aware: workspace
 // reads disk, range/commit read `git show <ref>:`) and mirror its numbered-line
@@ -140,10 +154,10 @@ const sourceNotPreloaded = "(not preloaded — fetch what you need via file_read
 // whole-file material over the remaining budget falls back to just its
 // functions' bodies (ranged_preload gate); with no symbols (or gate off) it is
 // named but not inlined so a ranged file_read still works.
-func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSource, relatedSource string, outcomes []string) {
+func (a *Agent) renderPieces(ctx context.Context, mats []material) (pieces []piece, outcomes []string) {
 	fr := a.fileReader()
 	if fr == nil {
-		return sourceNotPreloaded, "", nil
+		return nil, nil
 	}
 
 	// Stable fill order: essentials before aux. Sort is by prio only (slice order
@@ -153,15 +167,10 @@ func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSourc
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].prio < ordered[j].prio })
 
 	budget := preloadSourceBudget
-	var essential, aux strings.Builder
 	for _, m := range ordered {
-		out := &essential
-		if m.prio > 0 {
-			out = &aux
-		}
 		content, err := fr.Read(ctx, m.path)
 		if err != nil {
-			// Deleted/unreadable — the placeholder degrade below handles it.
+			// Deleted/unreadable — the placeholder degrade downstream handles it.
 			outcomes = append(outcomes, "unreadable "+m.path)
 			continue
 		}
@@ -169,11 +178,14 @@ func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSourc
 
 		if m.whole && len(content) <= budget {
 			budget -= len(content)
-			fmt.Fprintf(out, "File: %s (Total lines: %d)\n", m.path, len(lines))
+			var b strings.Builder
+			fmt.Fprintf(&b, "File: %s (Total lines: %d)\n", m.path, len(lines))
 			for i, line := range lines {
-				fmt.Fprintf(out, "%d|%s\n", i+1, line)
+				fmt.Fprintf(&b, "%d|%s\n", i+1, line)
 			}
-			out.WriteString("\n")
+			b.WriteString("\n")
+			pieces = append(pieces, piece{prio: m.prio, text: b.String(),
+				path: m.path, start: 1, end: len(lines), tot: len(lines)})
 			outcomes = append(outcomes, "whole "+m.path)
 			continue
 		}
@@ -182,15 +194,16 @@ func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSourc
 		// bodies as ranged blocks. Span-only materials always take this path;
 		// whole-file fallback additionally needs the ranged_preload gate.
 		if len(m.symbols) > 0 && (!m.whole || a.features.Enabled(feature.RangedPreload)) {
-			if rendered := renderSpans(m, content, lines, &budget); rendered != "" {
-				out.WriteString(rendered)
+			if spans := renderSpans(m, content, lines, &budget); len(spans) > 0 {
+				pieces = append(pieces, spans...)
 				outcomes = append(outcomes, "ranged "+m.path)
 				continue
 			}
 		}
 
 		if m.whole {
-			fmt.Fprintf(out, "File: %s — %d bytes exceeds the preload budget; read on demand via file_read\n\n", m.path, len(content))
+			pieces = append(pieces, piece{prio: m.prio, text: fmt.Sprintf(
+				"File: %s — %d bytes exceeds the preload budget; read on demand via file_read\n\n", m.path, len(content))})
 			outcomes = append(outcomes, "budget_miss "+m.path)
 			continue
 		}
@@ -198,7 +211,27 @@ func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSourc
 		// context; a note would spend prompt on what the reviewer can't use.
 		outcomes = append(outcomes, "dropped "+m.label)
 	}
+	return pieces, outcomes
+}
 
+// renderMaterials is the classic assembly of renderPieces: prio 0 concatenated
+// into {{unit_source}} (the reviewed files), prio >0 into {{related_source}}
+// (context-only bodies) — the two carry different review semantics (review
+// this vs. don't). typed_briefing replaces this with per-file messages; the
+// bytes here are unchanged from before the pieces refactor.
+func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSource, relatedSource string, outcomes []string) {
+	if a.fileReader() == nil {
+		return sourceNotPreloaded, "", nil
+	}
+	pieces, outcomes := a.renderPieces(ctx, mats)
+	var essential, aux strings.Builder
+	for _, p := range pieces {
+		if p.prio > 0 {
+			aux.WriteString(p.text)
+		} else {
+			essential.WriteString(p.text)
+		}
+	}
 	unitSource = strings.TrimRight(essential.String(), "\n")
 	if unitSource == "" {
 		unitSource = sourceNotPreloaded
@@ -206,12 +239,12 @@ func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSourc
 	return unitSource, strings.TrimRight(aux.String(), "\n"), outcomes
 }
 
-// renderSpans inlines each of m.symbols' bodies from content as a ranged block
-// mirroring file_read's range output (File header + LINE_RANGE + numbered
-// lines), charging bytes against budget. Returns "" when nothing fit or no
-// symbol resolved to a span.
-func renderSpans(m material, content string, lines []string, budget *int) string {
-	var b strings.Builder
+// renderSpans inlines each of m.symbols' bodies from content as one ranged
+// piece per symbol, mirroring file_read's range output (File header +
+// LINE_RANGE + numbered lines), charging bytes against budget. Returns nil
+// when nothing fit or no symbol resolved to a span.
+func renderSpans(m material, content string, lines []string, budget *int) []piece {
+	var out []piece
 	for _, sym := range m.symbols {
 		start, end, ok := unit.SymbolSpan(m.path, content, sym)
 		if !ok || start < 1 || end > len(lines) {
@@ -230,9 +263,76 @@ func renderSpans(m material, content string, lines []string, budget *int) string
 			continue // this body doesn't fit; a smaller later one still might
 		}
 		*budget -= s.Len()
-		b.WriteString(s.String())
+		out = append(out, piece{prio: m.prio, text: s.String(),
+			path: m.path, start: start, end: end, tot: len(lines)})
 	}
-	return b.String()
+	return out
+}
+
+// Typed-briefing slot pointers: with sources carried as separate messages, the
+// template's source slots hold pointers so the instructions around them keep
+// making sense (and custom templates keep substituting cleanly).
+const (
+	typedUnitSourcePointer = "(provided as separate messages after this task — do NOT call file_read on those ranges again)"
+	typedRelatedPointer    = "(provided as separate messages after this task)"
+)
+
+// assembleTypedBriefing builds the loop's opening conversation in the
+// typed_briefing shape: [template messages (source slots hold pointers), own
+// Files, related Files]. Files come AFTER the task message — the compression
+// engine freezes messages[0:2] as [system, task] and appends its summary to
+// index 1, so nothing may sit between them. Degradation under tokenLimit
+// mirrors the classic path: drop related Files first, then own Files (the
+// slot then shows the fetch-on-demand sentinel), recorded in deb.
+func (a *Agent) assembleTypedBriefing(build func(unitSlot, relatedSlot string) []llm.Message, pieces []piece, tokenLimit int, deb *session.Debrief) []msg.Msg {
+	var own, related []msg.Msg
+	var notes strings.Builder // budget-miss pointers stay in the slot, not as Files
+	for _, p := range pieces {
+		if p.path == "" {
+			notes.WriteString(p.text)
+			continue
+		}
+		f := msg.NewFile(p.path, p.start, p.end, p.tot, strings.TrimRight(p.text, "\n"))
+		if p.prio > 0 {
+			related = append(related, f)
+		} else {
+			own = append(own, f)
+		}
+	}
+
+	assemble := func(withOwn, withRelated bool) []msg.Msg {
+		unitSlot := sourceNotPreloaded
+		if withOwn && len(own) > 0 {
+			unitSlot = typedUnitSourcePointer
+		}
+		if n := strings.TrimRight(notes.String(), "\n"); n != "" {
+			unitSlot += "\n" + n
+		}
+		relatedSlot := ""
+		if withRelated && len(related) > 0 {
+			relatedSlot = typedRelatedPointer
+		}
+		out := msg.Wrap(build(unitSlot, relatedSlot))
+		if withOwn {
+			out = append(out, own...)
+		}
+		if withRelated {
+			out = append(out, related...)
+		}
+		return out
+	}
+
+	over := func(m []msg.Msg) bool { return llmloop.CountMessagesTokens(msg.Lower(m)) > tokenLimit }
+	domain := assemble(true, true)
+	if len(related) > 0 && over(domain) {
+		domain = assemble(true, false)
+		deb.Degradations = append(deb.Degradations, "related_source_dropped")
+	}
+	if len(own) > 0 && over(domain) {
+		domain = assemble(false, false)
+		deb.Degradations = append(deb.Degradations, "unit_source_dropped")
+	}
+	return domain
 }
 
 // renderUsageSites pre-greps where else the repo references the unit's changed
