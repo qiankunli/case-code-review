@@ -282,6 +282,7 @@ func New(args Args) *Agent {
 		CommentWorkerPool: args.CommentWorkerPool,
 		Session:           args.Session,
 		RelocationEnabled: f.Enabled(feature.Relocation),
+		FileDedupEnabled:  f.Enabled(feature.FileDedup),
 		DiffLookup:        a.findDiff,
 	})
 	return a
