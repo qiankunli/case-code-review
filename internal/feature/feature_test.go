@@ -2,10 +2,24 @@ package feature
 
 import "testing"
 
-func TestEnabled_DefaultsAllOn(t *testing.T) {
+func TestEnabled_Defaults(t *testing.T) {
+	// Product features default ON (the full feature set is the product; gates
+	// exist to turn things OFF for ablation). The only exceptions are
+	// explicitly experimental gates awaiting validation — keep this list short
+	// and deliberate: a gate landing here must say in its registry desc WHY.
+	experimental := map[Gate]bool{
+		TypedBriefing: true, // prompt-shape change pending replay A/B
+	}
 	var s Set // nil = all defaults
 	for _, n := range Names() {
-		if !s.Enabled(Gate(n)) {
+		g := Gate(n)
+		if experimental[g] {
+			if s.Enabled(g) {
+				t.Errorf("experimental gate %q should default off", n)
+			}
+			continue
+		}
+		if !s.Enabled(g) {
 			t.Errorf("gate %q should default on", n)
 		}
 	}
