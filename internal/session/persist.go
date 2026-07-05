@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/qiankunli/case-code-review/pkg/stdx/uuid"
+	"github.com/qiankunli/go-stdx/uuid"
 )
 
 // sessionSubDir is the subdirectory under ~/.casecodereview that holds session

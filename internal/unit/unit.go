@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/qiankunli/case-code-review/internal/model"
-	"github.com/qiankunli/case-code-review/pkg/stdx/slicesx"
+	"github.com/qiankunli/go-stdx/slicesx"
 )
 
 // Scope is how a Unit's Fragments were grouped — set when the Unit is formed.
