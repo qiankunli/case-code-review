@@ -70,6 +70,10 @@ type Deps struct {
 	// RelocationEnabled gates the LLM re-location sub-call (ablation feature gate).
 	// When false, an unresolved comment keeps its model-reported line (no extra LLM).
 	RelocationEnabled bool
+	// FileDedupEnabled gates file_read result deduplication (the file_dedup
+	// feature gate): a later read covering an earlier one stubs the earlier
+	// copy in place, so the model pays for file content once.
+	FileDedupEnabled bool
 	// DiffLookup is consulted by the code_comment tool path to resolve
 	// line numbers against the file's diff (or against full file content
 	// in scan mode — scan adapters return a synthetic Diff whose
@@ -539,7 +543,21 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	}
 
 	for _, rs := range results {
-		*messages = append(*messages, msg.Raw{M: llm.NewToolResultMessage(rs.ToolCallID, rs.Result)})
+		wire := llm.NewToolResultMessage(rs.ToolCallID, rs.Result)
+		var m msg.Msg = msg.Raw{M: wire}
+		// file_read results carry a path+range identity — keep it (typed File)
+		// so covered re-reads can be deduplicated below.
+		if f, ok := msg.FileFromToolResult(rs.Name, rs.Result, wire); ok {
+			m = f
+		}
+		*messages = append(*messages, m)
+	}
+	if r.deps.FileDedupEnabled {
+		if n := msg.DedupFiles(*messages); n > 0 {
+			telemetry.Event(ctx, "context.file_dedup",
+				telemetry.AnyToAttr("file.path", sc.Path()),
+				telemetry.AnyToAttr("stubbed", n))
+		}
 	}
 
 	finalCount := countMsgTokens(*messages)
