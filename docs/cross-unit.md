@@ -1,25 +1,27 @@
-# 跨 unit 协作：从"各查各案"到"并案"（设计方向，待实现）
+# Review Team：跨 unit 协作（设计定稿，v0 待实现）
 
-> 想法讨论的沉淀，未落地。隐喻链的下一环：Clue（线索）→ Dossier（卷宗）→ Briefing（交底）→ Debrief（复盘）→ **Case Conference（碰头会）/ Case Board（案情板）**。
+> 隐喻链全景：Clue（线索）→ Dossier（卷宗）→ Briefing（交底）→ **Bulletin（通报）** → Debrief（复盘），全部围着 **Board（案情板）**。
+>
+> 演进记录：本文从"碰头会 vs 案情板"的方案对比开始，中途否决了固定 phase 的碰头会（见下），定稿为 **Review Team**——共享状态（Board）+ turn 边界通信（Bulletin）+ 动态任务（cross_check），不做角色化。
 
 ## 理念
 
-一次需求变更围绕一个主题，它的几个 unit 之间必然有协作面——就像同一大案分线侦查的几个侦探，定期碰头能互通进展、避免重复跑腿。由此出发有两个候选收益：
+一次需求变更围绕一个主题，它的几个 unit 之间必然有协作面——同一大案分线侦查的侦探，靠案情板互通进展、避免重复跑腿。两个候选收益：
 
-1. **跨 unit 一致性召回**：单 unit 视角看不到的矛盾（Dockerfile 工具链版本 vs go.mod、配置默认值 vs 探活端口）是 eval 基线里最硬的漏报类别（`eval/README.md` §4.2），且恰好发生在价值最高的大改动上。chain 合并只覆盖**调用相邻**的改动函数；同主题但不相邻的 unit（同一配置键、同一常量、file/func 混合）之间今天没有任何共享面。
-2. **省重复 tool call**：briefing 预载消掉了"读自己的文件"，但不同 unit 的 loop 仍可能重复执行相同的 code_search+args。
+1. **跨 unit 一致性召回**：单 unit 视角看不到的矛盾（Dockerfile 工具链版本 vs go.mod、配置默认值 vs 探活端口）是 eval 基线里最硬的漏报类别（`eval/README.md` §4.2），且恰好发生在价值最高的大改动上。chain 合并只覆盖**调用相邻**的改动函数；同主题但不相邻的 unit 之间今天没有任何共享面。
+2. **省重复 tool call**：briefing 预载消掉了"读自己的文件"，但不同 unit 的 loop 仍会重复执行相同查询。
 
-**先量化再设计**（§7 方法论）：对 post-preload 时代 68 个多 unit session（3150 次 main-task tool call）统计，**跨 unit 精确重复的 (tool, args) 只占 5.9%**，最重的 session 8-15%。结论：收益 2 是小奖品——而且缓存只省 tool 执行（grep 本来就廉价），省不掉发起它的那个 LLM 轮次；要省轮次必须让内容在模型开口前就在 context 里，那是 briefing 的地盘，不是通信机制的。**真正的奖品是收益 1（质量），不是收益 2（成本）。**
+**先量化再设计**（§7 方法论）：post-preload 时代 68 个多 unit session（3150 次 main-task tool call）实测，**跨 unit 精确重复的 (tool, args) 只占 5.9%**，最重 session 8-15%。结论：收益 2 是小奖品——缓存只省 tool 执行，省不掉发起它的 LLM 轮次。**真正的奖品是收益 1（质量）。**
 
-对"多 Agent 团队"的总判断（全能解 ≠ 最优解）在 ccr 语境下的收敛：
+对"多 Agent 团队"的总判断在 ccr 语境下的收敛：
 
-- ccr 的**执行层并行已经存在**——一个 unit 一个 loop 就是并行分工；缺的是**共享面**，不是角色化。
-- 角色化的三项成本（上下文重建、文档交接衰减、流程完备 ≠ 单步质量）对分钟级生命周期的 review loop 全部成立且被放大：loop 只活 6-7 轮，没有"定期轮询 inbox"的空闲窗口，Mailbox/轮询模型假设的长驻 teammate 在这里不存在。
-- 北极星检验（"是否让 unit 更一等"）：共享面应该挂在 **run 与 unit 的既有模型**上（briefing 注入、汇总 pass），而不是引入一套平行的 actor 模型（team/inbox/lock）。
+- ccr 的**执行层并行已经存在**（一 unit 一 loop）；缺的是**共享面**与**动态任务**，不是角色化。
+- 北极星检验（"是否让 unit 更一等"）：共享面挂在 run 与 unit 的既有模型上（msg 消息类型、生命周期挂点），不引入平行 actor 模型。
+- 早期版本以"分钟级 loop 没有轮询窗口"否决过 in-run 通信——**turn 边界寄生方案修正了这一半**（轮询点寄生在本就存在的 turn 循环上，零调度成本）；仍然成立的另一半是：角色扮演无收益（业界扫描）、跨进程 mailbox/文件锁不适用（ccr 是同进程 goroutine）。
 
 ## 业界扫描（2026-07）
 
-围绕"multi-agent 能否提高 review 质量与速度"收了一轮业界证据，按结论组织：
+围绕"multi-agent 能否提高 review 质量与速度"的证据，按结论组织：
 
 **质量收益有三条被验证的路径，没有一条是"角色化团队"：**
 
@@ -27,43 +29,74 @@
 2. **并行分工靠上下文分桶，不靠角色**：Anthropic 的 +90.2%（research 任务）中 80% 的方差由 token 用量解释——multi-agent 本质是"把更多 token 花在多个独立 context window 里"；商业工具中 Greptile 的形态是"代码图 + 并行 agent 各审一块"——恰是 ccr 的 unit 分桶 + codegraph 已有形态。
 3. **专业化按 stage 不按人设**：AutoReview（FSE'25）的三 agent 是 Detect→Locate→Repair 流水线专业化（F1 +18.7%）；CodeRabbit 是 AST/SAST/LLM 多层管道。没有一家商业 review 工具 ship 了带 mailbox 的角色团队。
 
-**两个直接影响碰头会设计的负面结果：**
+**两个直接影响设计的负面结果：**
 
-- **辩论/多轮共识有反效果**："More Rounds, More Noise" 实测多轮 review 召回小升、精度大降，**最优轮数 = 1**；同源模型投票会在"语法合理但语义错误"的答案上收敛，共识把少数派的正确答案滤掉、把共享错误放大。
-- **MAST 失败分类**（1600+ trace，14 种失败模式）：spec/设计缺陷 41.8% + agent 间失调 36.9% + 验证缺失 21.3%——协调本身就是主要失败源，且"gains on benchmarks are often minimal"；修系统设计比堆 agent 有效。
+- **辩论/多轮共识有反效果**："More Rounds, More Noise" 实测多轮 review 召回小升、精度大降，**最优轮数 = 1**；同源模型投票在"合理但错"的答案上收敛，共识放大共享错误。→ cross_check 任务是"一轮核查 + kill-mandate 纪律"，不是辩论。
+- **MAST 失败分类**（1600+ trace）：spec/设计缺陷 41.8% + agent 间失调 36.9% + 验证缺失 21.3%——协调本身是主要失败源。→ 消息分级、observation 不得作事实引用，由 lowering 统一盖章。
 
-**速度**：并行 wall-clock 收益真实（Anthropic 并行 spawn + 并行 tool 省 90% 时间）但 ccr 的 unit 并发已经拿到了它；代价是 multi-agent ≈ **15× chat 的 token**——research 可以偶发地烧，review 每 PR 都跑，经济性约束严得多。Anthropic 自己的适用条件也排除了本场景："大多数 coding 任务的真并行度低于 research"、"需要共享上下文/相互依赖的任务不适合"。
+**速度**：并行 wall-clock 收益 ccr 已经拿到（unit 并发）；multi-agent ≈ 15× chat token 的教训要求 board 注入必须封顶、增量、定向。**Claude Code Agent Teams**（lead/共享任务表/mailbox/文件锁）的官方定位是交互式长会话，其文件系统机制是**跨进程税**——ccr 同进程 goroutine 不必交。
 
-**Claude Code Agent Teams**（shipped 的 lead/共享任务表/mailbox/文件锁，即本文讨论的机制原型）：官方定位是**交互式长会话**——多方面调查、竞争假设 debug、跨层协作，人做 lead 的场景；不是嵌入式 per-PR 批处理管道。与本文"Mailbox 归宿在外层编排"的判断一致。
+## 定稿架构
 
-**对本文方案的修正**：碰头会（P1）必须是"**一轮汇总 + 一轮否证**"，不是多轮辩论——否证者用 kill-mandate 姿态（默认怀疑、找反证），有条件时跨模型（routing 池现成）；这是把业界唯一稳定复现的质量增益（verifier）接到跨 unit 面上。
+### 总映射：team 要素 vs ccr 现状
 
-## 方案空间（按 ROI 排序）
+| Team 要素 | ccr 对应 | 增量 |
+|---|---|---|
+| Teammates | unit loop（已有：独立 context、并发） | 无 |
+| Lead 拆任务 | split/merge（已有：确定性，比 LLM 拆得好） | 无（见 D5） |
+| Shared Task List | dispatchUnits 的静态任务集 | **动态派生**（cross_check，v1） |
+| Mailbox/通信 | 无 | **Board + Bulletin**（v0） |
 
-| 机制 | 治什么 | 形态 | 判断 |
+### 决策记录
+
+| # | 决策 | 内容 | 依据 |
 |---|---|---|---|
-| **P1 碰头会**（cross-unit synthesis pass） | 跨 unit 一致性漏报 | 全部 loop 结束后追加**一个** loop：输入 = 各 unit 的 findings + debrief 摘要 + diff 总览，专职找跨 unit 矛盾 | 最高优先。一次额外 loop 的确定性成本，直指已知漏报；无调度耦合，feature gate 即可消融 |
-| **P2 run 级 briefing 补给** | 重复搜索背后的共同缺口 | 从 debrief/session 挖"多个 unit 都在搜什么"，把高频共同查询升级为 run 级预载（repo_map 先例） | 数据驱动，等 P1 上线后攒 debrief 数据再定内容；usage-sites 已覆盖一部分 |
-| **P3 案情板**（Case Board） | 早完成的 unit 给后启动的 unit 递线索 | run 级 append-only 黑板：loop 收尾写一条"给同案侦探的备忘"，后启动 unit 的 briefing 注入当前板面 | 依赖**分波调度**（先 func 后 chain/coalesce）才有时序收益，牺牲 wall-clock；等 P1 证明"共享内容有用"再评估 |
-| ✗ in-run agent team（Lead/Mailbox/共享任务表/文件锁） | — | 长驻角色 + 轮询 | **不做**。轮询窗口不存在、角色交接衰减、锁与状态机的复杂度都为分钟级 loop 付不起；"context 质量 > 流程完备"的结论反对它 |
+| D1 | 进程模型 | 内存 Board（mutex 结构体）+ msg 类型；板事件落 session（`board_post`/`board_pull` 记录）只为 eval，不为通信 | 同进程 goroutine；文件/锁/mailbox 是跨进程税 |
+| D2 | 读写不对称 | **发布**：引擎自动提取事实（读了 X/报了 Y，零成本）+ `post_bulletin` tool 发判断（只有模型知道它怀疑什么）；**消费**：turn 边界注入定向增量，**不做 pull tool** | 递线索是 push 形状（模型无法查询它不知道存在的东西）；check_board 轮次 = 刚消灭的 fetch 成本；repeated_reads/wrap-up 证明可选行为不可靠（MAST"ignoring peer input"入口） |
+| D3 | 路由与分级 | symbols/paths 交集定向抄送；intent/observation/confirmed 三级，lowering 统一盖章"未确认观察不得作为事实引用" | 5.9% 重复率 vs N 倍广播 token；传染性误报防线 |
+| D4 | 动态任务 | teammate 可派生 `cross_check(units, 疑点)` 任务，空闲 worker 领走跑新 loop——**这是碰头会的正确形态**：不是每次都开的固定 phase，而是有事才碰头、发现者带上下文提出（交接衰减最小）。碰头会固定 phase 方案已否决，其 kill-mandate prompt 纪律遗产归 cross_check | 固定 phase = 无证据的常态成本；动态派生 = 按需 |
+| D5 | Lead | v1 不设 LLM Lead：任务分解已确定性且更优；汇总归 collector + review-filter；协调归任务队列。真 Lead 等 v1 数据 | Anthropic orchestrator 价值在开放式分解，review 不是；Lead 是 MAST 协调失败的最贵入口 |
 
-> Mailbox/共享任务列表这类机制的正确归宿是**外层编排**（devloop 级的长驻协作，跨 run、跨仓、跨天），不是一次 review run 内部。
+### 消费侧两道闸（board 信息多，怎么拿、怎么控）
 
-## 关键设计（P1 碰头会展开）
+**闸 1 · 关注面 = Dossier（拿相关的）**：unit 的利益图不用新算——
 
-1. **输入是 debrief 不是 transcript**：碰头会读各 unit 的 findings（`finding` 记录）+ debrief（clue_refs、materials、outcome）+ 文件级 diff 总览——都是 schema v2 已落盘的结构化数据，不重放各 loop 的对话（那是交接衰减）。
-2. **专职找"跨"**：prompt 明确只报跨 unit 矛盾（版本/配置/契约在两个 unit 里不一致），单 unit 内的问题各 loop 已经报过——避免变成第二遍全量 review。
-3. **一轮汇总 + 一轮否证，不做辩论**（业界扫描的直接结论）：碰头会产出先过一个 kill-mandate 姿态的否证者（默认怀疑、找反证，有条件时用 routing 池里的异构模型做 cross-model critic），再进评论管道。多轮共识被实证证伪（精度崩、共享错误放大），不采用。
-4. **产出走既有管道**：碰头会的 finding 同样过 review-filter、打指纹、落 `finding` 记录，posterior.py 无差别消费。
-5. **量测挂指标体系**：准确性侧看它对§4.2 类漏报的召回（固定回归集里有两个实锤案例可当验收样本：builder 版本 vs go.mod、健康端口错配）；成本侧它就是一个多出来的 unit（debrief 照落，`formed: conference`）；gate `cross_unit` 消融。
+```
+interest(unit) = 自己的 paths + AllSymbols      ← 身份
+              ∪ clue_refs                       ← 邻居（caller/callee/owner/used，dossier 现成）
+              ∪ usage-sites 命中文件             ← 谁引用我（briefing 已算过）
+```
 
-## 关键设计（P3 案情板：turn 级形态，讨论中）
+Bulletin 带路由键（tool 参数必填；自动层从 tool call 免费提取），匹配 = 集合求交，键是 symbol-id 与精确路径（无短名撞车）。打分：symbol 命中 > path 命中，confirmed > observation > intent 作乘数。**context-model 的 Relation 轴本来就是"这个 unit 关心什么"的定义——board 路由是它的第二个消费者。**
 
-从 harness loop 视角对齐（loop = `build_context → llm_call → tool_exec → compress`，一圈一 turn），最糙的群聊版本是：
+**闸 2 · 容量四道防线（相关但太多）**：
+
+1. **源头小**：bulletin 发布即摘要+指针（text 封顶；事实型通报的内容本来就是 path+range，要全文自己 file_read）——板上只有卡片，没有大对象；
+2. **增量游标**：per-订阅者 last-pull 游标，turn 边界只注新增；板面安静 = 零 token（"每 turn 增量"支配"每 N turn 查全量"）；
+3. **双封顶**：每 turn top-K 条（按分）+ 字节上限；溢出不积压（陈旧通报失去价值），注一行"板上另有 N 条相关"——若 debrief 显示模型对此有反应，即是加 `check_board` 查询 tool 的证据（v1 后门，先不做）；
+4. **驱逐（白捡）**：注入的 BoardMsg 是 typed 消息，自动进 file_evict 的可再生性驱逐序（板面可重拉，与 File 同档，先于推理被 stub）——C1/C2 的机器直接复用。
+
+v1 第五道：板面自身压缩（同主题 supersede，与 File dedup 同构；intent 被后续 confirmed 关闭）+ per-loop 累计 board 预算（超了只放 confirmed）。
+
+### Bulletin 语义
+
+Bulletin = loop 干活期间贴到板上的对同伴可见的进展通报，字段 `{from, turn, level, symbols/paths, text, ref}`。三概念分辨：
+
+| | 时机 | 方向 | 受众 |
+|---|---|---|---|
+| Briefing 交底 | 开工前 | 编排器 → 我 | 本 loop |
+| Bulletin 通报 | 干活中 | 我 → 案情板 | 其他 loop |
+| Debrief 复盘 | 收工后 | 我 → transcript | eval / 后验 |
+
+final bulletin（收工通报）挂在 scope `Close()` 上——生命周期（unit-model.md 关键设计 8，已实现）即为此备好的挂点。
+
+### 推导记录：从群聊到定稿
+
+harness loop 视角（loop = `build_context → llm_call → tool_exec → compress`，一圈一 turn）的最糙群聊版：
 
 ```python
 while condition:
-    inbox = board.pull(exclude=self)            # 其它 loop 的消息，注入为一条 user 侧 message
+    inbox = board.pull(exclude=self)   # turn 顶部拉别人的消息
     context = build_context(query, inbox)
     llm_result = llm_call(context)
     if llm_result.tool_calls:
@@ -73,45 +106,39 @@ while condition:
         return llm_result.text
 ```
 
-**这个形态修正了本文早先的一半反对意见**：发布/消费点寄生在本来就存在的 turn 边界上，不需要长驻 teammate 的空闲轮询——mailbox 模型的"轮询窗口不存在"批评对它失效；失效的只是那一半，交接衰减与协调失败的批评仍在。
+四个问题（token 账倒挂 / 注意力污染 / 时序偏差——turn 级通道天然传过程不传结论 / 传染性误报+不可复现）+ 三个约束（摘要化 / 定向路由 / 消息分级）→ 收敛为上面的定稿。时序偏差是 v0 试验要回答的最大不确定：并发 loop 生命周期高度重叠，bulletin 的可消费窗口可能很小——自动层（事实通报 turn 2-3 即有）能缓解多少，看数据。
 
-糙版四个问题（按严重度）：
+## 实现选型：gate + 单引擎接缝，不 fork
 
-1. **token 账倒挂**：N 个 loop × 每 turn 广播原始 (intent+tool 结果)，每个 loop 为其它 N-1 个付 token（10 unit × 7 turn ≈ 每 loop 额外 60-70KB）——这正是业界 15× token 的来源；而跨 unit 精确重复实测仅 5.9%。
-2. **注意力污染**：大部分消息与本案无关，稀释 spec 核对，且冲击 Strict Focus（别的 unit 的代码进来后可能对非本 diff 发 finding）。
-3. **时序偏差**：turn 级通道天然传"过程"不传"结论"——快 loop 最有价值的收尾结论产生时，别的 loop 多半也接近结束；结论级收益归碰头会。
-4. **传染性误报 + 不可复现**：observation 被当 confirmed 引用（MAST 的 agent 间失调 36.9% 就在这类通道上）；注入使行为依赖并发时序，eval A/B 被调度噪声污染。
+1. **现有 loop 不止 7 行伪代码**：wrap-up、compression、session 落盘、token 记账、comment 管道、生命周期/debrief 全挂在引擎上，fork = 每个修复改两遍（快照竞态修复即先例）。
+2. **eval 方法论要求同引擎消融**（§2.5）：机制收益与实现差异必须可分离。
+3. **仓库同一答案已用四次**：plan / review-filter / relocation / typed_briefing 都是"单引擎 + gate 可选环节"。
 
-活下来的三个约束——加上之后"群聊"收敛为**案情板的 turn 级形态**（按 symbol 索引的板面 + turn 边界按相关性拉取）：
-
-1. **摘要化**：播结论不播原始 tool 输出（result 放共享存储，按需取）；
-2. **定向路由**：按 symbols/paths 交集投递，群聊 → 定向抄送；
-3. **消息分级**：intent / observation / confirmed 三档，禁止把 observation 当事实引用。
-
-## 实现选型：gate + 单引擎接缝，不 fork（讨论中）
-
-若实现，**开 feature gate 改现有 loop，把改动收敛成一个极小接缝**；不做独立 loop 实现——"完全独立实现"是用最贵的方式跑一个最便宜的实验：
-
-1. **现有 loop 不止 7 行伪代码**：wrap-up 截断纪律、compression、session 落盘、token 记账、comment 管道（异步 relocation）、outcome/debrief 全挂在引擎上。fork 意味着每个后续修复改两遍（debrief 竞态修复即是先例），或者"抽共享核心"——抽完得到的就是接缝方案。
-2. **eval 方法论要求同引擎消融**：gate 的意义是 leave-one-out；群聊跑在另一套实现上，机制收益和实现差异混在一起无法归因（违反 §2.5"单项归因走 gate 消融"）。价值假设越存疑，对照越要干净。
-3. **仓库已用同一答案回答过三次**：plan / review-filter / relocation 都是"单引擎 + gate 控制的可选环节"，无一 fork。
-
-接缝形态（引擎从此不再为实验改动，迭代全在 Board 实现包里）：
+接缝（引擎不再为实验改动，迭代全在 Board 实现包）：
 
 ```go
 // llmloop.Deps 增加可选依赖；nil = 今天的行为，prompt 逐字节不变
 Board Board
 type Board interface {
-    Pull(sc session.Scope) []llm.Message   // turn 顶部
-    Publish(sc session.Scope, note Note)   // tool 执行后
+    Pull(sc session.Scope) []msg.Msg     // turn 顶部：定向增量（BoardMsg，domain 消息）
+    Publish(sc session.Scope, b Bulletin) // tool 执行后：自动层事实提取；post_bulletin tool 走同一入口
 }
 ```
 
-配套纪律：gate `group_chat` 默认**关**（实验特性，与"默认全开"惯例相反，registry 支持）；manifest 自描述；debrief 补 `messages_pulled/published` 计数（时序不可复现的归因依据）。**P1 碰头会不需要此接缝**——它是编排层的一个普通额外 loop，引擎零改动；P1 先行既避开引擎风险，也为"P3 值不值得开接缝"提供证据。
+## 切片、验收与已知弱点
+
+**v0（纯机制）**：Board 内存结构 + `Bulletin`/`BoardMsg` msg 类型 + 自动发布层 + turn 边界定向注入（闸 1+闸 2 前四道）+ debrief 计数（`board_pulled/published/evicted`）+ 板事件落 session。gate `review_team` 默认关（experimental）。**不含**：post_bulletin tool、cross_check、Lead、板面压缩。
+
+**v1（判断级协作，v0 数据达标后）**：`post_bulletin` + `post_task(cross_check)` 动态任务队列 + 板面 supersede 压缩 + 累计预算。
+
+**验收（先写死）**：回归集 gate on/off——①两个跨文件实锤（builder 版本 vs go.mod、健康端口错配）的召回；②精度不回退；③token 增幅 <15%；④pulled→行为改变的证据（如 pulled 后该 unit 少了对应的重复 tool call）。**①或④至少中一个才推进 v1；若 pulled 高而行为无变化，止损。**
+
+**已知弱点（接受后开工）**：bulletin 触发的 loop 内 finding 无法单条归因（cross_check 的可以——独立 scope），验收靠回归集总量对比 + pulled/行为相关性分析。
 
 ## References
 
-- 漏报证据与方法论：`eval/README.md` §4.2（跨文件一致性）、§7（数据驱动优先级）
-- 既有共享面：run 级 repo_map（`internal/agent/repomap.go`）、briefing（`docs/context-model.md` 关键设计 8）
-- 采集面（碰头会的输入）：debrief / finding 记录（`eval/README.md` §8）
+- 漏报证据与方法论：`eval/README.md` §4.2（跨文件一致性）、§7（数据驱动优先级）、§9（replay 首个翻转许可证先例）
+- 既有共享面与机器：briefing（`docs/context-model.md` 关键设计 8）、msg model 与驱逐（`docs/message-model.md`）、unit 生命周期（`docs/unit-model.md` 关键设计 8）
+- 采集面：debrief / finding 记录（`eval/README.md` §8）
+- 独立 backlog（与 team 无依赖）：run 级 briefing 补给——从 debrief 挖"多个 unit 都在搜什么"升级为 run 级预载（repo_map 先例）
 - 业界扫描来源：[Anthropic multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system) · Cognition [Don't Build Multi-Agents](https://cognition.com/blog/dont-build-multi-agents) / [Multi-Agents: What's Actually Working](https://cognition.com/blog/multi-agents-working) · [MAST: Why Do Multi-Agent LLM Systems Fail (arXiv:2503.13657)](https://arxiv.org/abs/2503.13657) · [CodeAgent (arXiv:2402.02172)](https://arxiv.org/html/2402.02172v4) · [AutoReview (FSE'25)](https://dl.acm.org/doi/10.1145/3696630.3728618) · [More Rounds, More Noise (arXiv:2603.16244)](https://arxiv.org/pdf/2603.16244) · [Refute-or-Promote (arXiv:2604.19049)](https://arxiv.org/html/2604.19049) · [Claude Code Agent Teams docs](https://code.claude.com/docs/en/agent-teams) · [Greptile vs CodeRabbit](https://www.greptile.com/greptile-vs-coderabbit)
