@@ -104,7 +104,7 @@ func TestEvictFiles(t *testing.T) {
 	mk := func(path string, lines int) *msg.File {
 		body := strings.Repeat("1|some code line here\n", lines)
 		result := fmt.Sprintf("File: %s (Total lines: %d)\nIS_TRUNCATED: false\nLINE_RANGE: 1-%d\n%s", path, lines, lines, body)
-		f, ok := msg.FileFromToolResult("file_read", result, llm.NewToolResultMessage("c", result))
+		f, ok := msg.FileFromToolResult("file_read", "c", result)
 		if !ok {
 			t.Fatalf("promotion failed for %s", path)
 		}
