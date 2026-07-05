@@ -43,13 +43,27 @@ func TestFileFromToolResult(t *testing.T) {
 
 func TestFileStubKeepsPairing(t *testing.T) {
 	f := mkFile(t, "pkg/a.go", 120, 10, 40)
-	f.Stub()
+	f.Stub(StubSuperseded)
 	got := f.Lower()
 	if got.Role != "tool" || got.ToolCallID != "c1" {
 		t.Fatalf("stub must keep the tool_result pairing: %+v", got)
 	}
 	if !strings.Contains(got.ExtractText(), "superseded") || strings.Contains(got.ExtractText(), "1|code") {
 		t.Fatalf("stub must elide content: %q", got.ExtractText())
+	}
+
+	// Eviction has its own pointer text (how to get the content back), and the
+	// first stub reason wins.
+	e := mkFile(t, "pkg/b.go", 10, 1, 10)
+	e.Stub(StubEvicted)
+	ew := e.Lower()
+	if txt := ew.ExtractText(); !strings.Contains(txt, "context budget") || !strings.Contains(txt, "file_read") {
+		t.Fatalf("evicted stub text off: %q", txt)
+	}
+	f.Stub(StubEvicted)
+	fw := f.Lower()
+	if !strings.Contains(fw.ExtractText(), "superseded") {
+		t.Fatal("first stub reason must win")
 	}
 }
 
