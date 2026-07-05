@@ -99,3 +99,40 @@ func TestRunPerFile_FileDedupGateOff(t *testing.T) {
 		}
 	}
 }
+
+func TestEvictFiles(t *testing.T) {
+	mk := func(path string, lines int) *msg.File {
+		body := strings.Repeat("1|some code line here\n", lines)
+		result := fmt.Sprintf("File: %s (Total lines: %d)\nIS_TRUNCATED: false\nLINE_RANGE: 1-%d\n%s", path, lines, lines, body)
+		f, ok := msg.FileFromToolResult("file_read", result, llm.NewToolResultMessage("c", result))
+		if !ok {
+			t.Fatalf("promotion failed for %s", path)
+		}
+		return f
+	}
+	oldest := mk("a.go", 60)
+	middle := mk("b.go", 60)
+	newest := mk("c.go", 60)
+	msgs := []msg.Msg{msg.Text("user", "task"), oldest, middle, newest}
+
+	// A limit reachable by shedding exactly the two oldest files (stubs still
+	// cost tokens — measure one on a sacrificial twin instead of guessing).
+	sacrifice := mk("a.go", 60)
+	sacrifice.Stub(msg.StubEvicted)
+	stubTokens := countMsgTokens([]msg.Msg{sacrifice})
+	limit := countMsgTokens([]msg.Msg{msgs[0], newest}) + 2*stubTokens + 5
+	if n := evictFiles(msgs, limit); n != 2 {
+		t.Fatalf("evicted = %d, want 2", n)
+	}
+	if !oldest.Stubbed() || !middle.Stubbed() || newest.Stubbed() {
+		t.Fatal("must evict oldest-first and keep the newest read")
+	}
+	if got := countMsgTokens(msgs); got > limit {
+		t.Fatalf("still over limit after eviction: %d > %d", got, limit)
+	}
+
+	// Under-limit conversations are untouched.
+	if n := evictFiles(msgs, 1<<20); n != 0 {
+		t.Fatal("must not evict under the limit")
+	}
+}
