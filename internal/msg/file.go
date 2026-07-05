@@ -9,24 +9,31 @@ import (
 	"github.com/qiankunli/case-code-review/internal/llm"
 )
 
-// File is a typed message for file content that entered the conversation as a
-// file_read tool result. It keeps the identity a wire tool_result erases —
-// which path, which line range — so the loop can reason about file content as
-// content: deduplicate a re-read of the same range, and (later) evict by
-// re-derivability when the context tightens (file content is the one thing
-// that can always be fetched again).
+// File is a typed message for file content in the conversation — a file_read
+// tool result, or a briefing preload. It keeps the identity a wire message
+// erases — which path, which line range, what content, which tool call it
+// answers — so the loop can reason about file content as content: deduplicate
+// a re-read of the same range, and evict by re-derivability when the context
+// tightens (file content is the one thing that can always be fetched again).
+//
+// Deliberately NO wire form is stored: the identity is content + pairing, and
+// the wire SHAPE (tool_result vs user text) is Lower()'s rendering decision —
+// the precondition for ever A/B-ing per-provider forms (docs/message-model.md
+// 关键设计 4). Today the decision is fixed: paired content renders as the
+// tool_result it answers, unpaired as user text.
 //
 // A File is held by pointer so it can be stubbed IN PLACE: stubbing swaps the
 // lowered text for a one-line pointer while keeping the message's position and
-// tool_call_id — the 1:1 lowering invariant and the wire protocol's
+// tool_call pairing — the 1:1 lowering invariant and the wire protocol's
 // call/result pairing both stay intact.
 type File struct {
 	Path       string
-	Start, End int // 1-indexed inclusive line range actually shown
-	Total      int // total lines in the file at read time
+	Start, End int    // 1-indexed inclusive line range actually shown
+	Total      int    // total lines in the file at read time
+	Content    string // the rendered block (file_read's numbered-line format)
 
-	wire    llm.Message // the original tool_result (role + ToolCallID preserved)
-	stubbed StubReason  // "" = full content
+	toolCallID string     // non-empty: entered via the tool protocol; pairing must survive
+	stubbed    StubReason // "" = full content
 }
 
 // StubReason selects the pointer text a stubbed File lowers to — the model
@@ -41,11 +48,11 @@ const (
 	StubEvicted StubReason = "evicted"
 )
 
-// Lower renders the full content, or — once stubbed — a pointer that keeps the
-// message's wire shape (a tool_result stays a paired tool_result, a briefing
-// preload stays a user message) while spending no meaningful tokens.
+// Lower renders the full content, or — once stubbed — a pointer that spends no
+// meaningful tokens. Shape selection lives HERE, not at construction: paired
+// content answers its tool call, unpaired content is user text.
 func (f *File) Lower() llm.Message {
-	var text string
+	text := f.Content
 	switch f.stubbed {
 	case StubSuperseded:
 		text = fmt.Sprintf("File: %s lines %d-%d — superseded by a later read of the same content below; elided.",
@@ -53,13 +60,11 @@ func (f *File) Lower() llm.Message {
 	case StubEvicted:
 		text = fmt.Sprintf("File: %s lines %d-%d — elided to fit the context budget; call file_read again if you still need it.",
 			f.Path, f.Start, f.End)
-	default:
-		return f.wire
 	}
-	if f.wire.Role == "tool" {
-		return llm.NewToolResultMessage(f.wire.ToolCallID, text)
+	if f.toolCallID != "" {
+		return llm.NewToolResultMessage(f.toolCallID, text)
 	}
-	return llm.NewTextMessage(f.wire.Role, text)
+	return llm.NewTextMessage("user", text)
 }
 
 // Stub elides the content with the given reason (idempotent; the first reason
@@ -91,24 +96,24 @@ var fileReadHeader = regexp.MustCompile(`^File: (.+) \(Total lines: (\d+)\)\nIS_
 const FileReadToolName = "file_read"
 
 // NewFile builds a File whose content entered the conversation OUTSIDE the
-// tool protocol — a briefing preload carried as a user-role message. Same
-// identity, same dedup/evict participation; only the wire shape differs (no
-// tool_call pairing to preserve).
+// tool protocol — a briefing preload. Same identity, same dedup/evict
+// participation; it just has no tool_call pairing to preserve.
 func NewFile(path string, start, end, total int, content string) *File {
 	return &File{
-		Path:  path,
-		Start: start,
-		End:   end,
-		Total: total,
-		wire:  llm.NewTextMessage("user", content),
+		Path:    path,
+		Start:   start,
+		End:     end,
+		Total:   total,
+		Content: content,
 	}
 }
 
-// FileFromToolResult promotes a file_read tool result into a *File. Returns
-// (nil, false) for other tools or when the result doesn't carry the expected
-// header (errors, truncation notices with unexpected shapes) — the caller
-// falls back to Raw and nothing is lost.
-func FileFromToolResult(toolName, result string, wire llm.Message) (*File, bool) {
+// FileFromToolResult promotes a file_read tool result into a *File carrying
+// the pairing id it must keep answering. Returns (nil, false) for other tools
+// or when the result doesn't carry the expected header (errors, truncation
+// notices with unexpected shapes) — the caller falls back to Raw and nothing
+// is lost.
+func FileFromToolResult(toolName, toolCallID, result string) (*File, bool) {
 	if toolName != FileReadToolName {
 		return nil, false
 	}
@@ -123,11 +128,12 @@ func FileFromToolResult(toolName, result string, wire llm.Message) (*File, bool)
 		return nil, false
 	}
 	return &File{
-		Path:  strings.TrimSpace(m[1]),
-		Start: start,
-		End:   end,
-		Total: total,
-		wire:  wire,
+		Path:       strings.TrimSpace(m[1]),
+		Start:      start,
+		End:        end,
+		Total:      total,
+		Content:    result,
+		toolCallID: toolCallID,
 	}, true
 }
 

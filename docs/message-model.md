@@ -19,10 +19,22 @@ LLM API 的 wire 格式只有 user / assistant / system / tool 四种 role，**r
 
 ## 关键设计
 
+0. **File 的身份 = 内容 + 配对，不含形态**：`File{Path,Range,Content,toolCallID}` 不存 wire 消息；tool_result vs user 文本是 `Lower()` 的渲染决策——这是将来 per-provider 形态 A/B 的前提（若形态在构造期烧死，关键设计 4 的承诺无法兑现）。
 1. **lowering 1:1 不变量**：一条领域消息恰好降为一条 wire 消息。compression 按消息**索引**分区（frozen/compress/active、assistant+tool rounds），1:N 或 drop 型 lowering 会悄悄错位分区。要从 context 消失的消息走**驱逐**（从 `[]Msg` 移除），不走"降为空"。
 2. **wire-shaped 的内容就该是 Raw**：loop 的操舵语（wrap-up、"call task_done" 重试提示）本质就是 wire 文本，不强行领域化——直通不是过渡态，是这类消息的终态。
 3. **session 记 lowered 形态**：transcript 记录模型实际看到的东西（llm_request = `msg.Lower` 的结果），领域形态入库是 PR C 之后按需再议——refactor 不背 schema 变更。
 4. **lowering 的最终归宿在 client 边界（讨论中）**：per-provider 的渲染决策（FileMsg 降成 user 文本还是 tool_result）逻辑上属于"知道 provider 是谁"的那一层，即 llm client。但今天只有一种 wire 模型、零个 per-provider 决策，且 `msg` 依赖 `llm`（wire 类型所在），client 直接收 `[]msg.Msg` 会造成 import 环。所以：**当下 lowering 留在 loop 侧**（`RunPerFile` 内、API 调用前一行）；当 PR B/C 真出现 provider 敏感的渲染决策时，再引入 client 包装层（`ReviewClient{llm.LLMClient; Renderer}`）或把 wire 类型下沉成独立包解环——那时搬迁只是移动一个调用点，因为 lowering 从未散开过。
+
+## flip 后清理清单（typed_briefing 转默认开时执行，债务挂账）
+
+- 删 classic 装配：`renderMaterials` 及 reviewUnit 的字符串降级分支（届时只剩 `assembleTypedBriefing` 一套降级）；
+- `piece` 塌缩：byte-identical 纪律的过渡表示，briefer 渲染直接产 `File`；
+- 模板 source 槽位语义简化（指针文本成为唯一形态）；
+- feature 测试的实验清单移除 typed_briefing。
+
+## 已知权衡
+
+- **transcript 每轮全量记录**：`llm_request` 存当轮完整消息列表（O(轮数×context) 落盘），typed 预载会随轮重复入盘——换取 schema 简单与逐轮可回放；eval 侧读取应流式。继承自 ocr 的设计，若 transcript 体积成为瓶颈，改增量记录是独立的 schema v3 议题。
 
 ## References
 
