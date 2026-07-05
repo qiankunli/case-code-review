@@ -8,6 +8,7 @@ import (
 
 	"github.com/qiankunli/case-code-review/internal/config/template"
 	"github.com/qiankunli/case-code-review/internal/llm"
+	"github.com/qiankunli/case-code-review/internal/msg"
 	"github.com/qiankunli/case-code-review/internal/session"
 	"github.com/qiankunli/case-code-review/internal/tool"
 )
@@ -83,7 +84,7 @@ func TestWrapUp_DeadlineForcesVerdictTurn(t *testing.T) {
 	// before the FIRST round.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	outcome, err := r.RunPerFile(ctx, []llm.Message{llm.NewTextMessage("user", "review this")}, scope())
+	outcome, err := r.RunPerFile(ctx, msg.Wrap([]llm.Message{llm.NewTextMessage("user", "review this")}), scope())
 	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestWrapUp_RoundBudgetForcesVerdictTurn(t *testing.T) {
 	}}
 	r := newWrapUpRunner(client, 4)
 
-	outcome, err := r.RunPerFile(context.Background(), []llm.Message{llm.NewTextMessage("user", "review this")}, scope())
+	outcome, err := r.RunPerFile(context.Background(), msg.Wrap([]llm.Message{llm.NewTextMessage("user", "review this")}), scope())
 	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
 	}
@@ -140,7 +141,7 @@ func TestWrapUp_NoTaskDoneRecordsIncomplete(t *testing.T) {
 	}}
 	r := newWrapUpRunner(client, 3)
 
-	outcome, err := r.RunPerFile(context.Background(), []llm.Message{llm.NewTextMessage("user", "review this")}, scope())
+	outcome, err := r.RunPerFile(context.Background(), msg.Wrap([]llm.Message{llm.NewTextMessage("user", "review this")}), scope())
 	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
 	}

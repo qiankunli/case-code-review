@@ -24,6 +24,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/llmloop"
 	"github.com/qiankunli/case-code-review/internal/model"
+	"github.com/qiankunli/case-code-review/internal/msg"
 	"github.com/qiankunli/case-code-review/internal/session"
 	"github.com/qiankunli/case-code-review/internal/spec"
 	"github.com/qiankunli/case-code-review/internal/stdout"
@@ -972,7 +973,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	// REVIEW_FILTER_TASK is NOT run here: it is a file-level post-pass
 	// (runReviewFilters), so sibling Units of the same file don't filter each
 	// other's comments against the wrong diff slice.
-	outcome, err := a.runner.RunPerFile(ctx, messages, sc)
+	outcome, err := a.runner.RunPerFile(ctx, msg.Wrap(messages), sc)
 	deb.Outcome, deb.Reason = outcome.State, outcome.Reason
 	a.queueDebrief(sc, deb)
 	return err
