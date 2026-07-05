@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/llm"
+	"github.com/qiankunli/case-code-review/pkg/stdx/uuid"
 )
 
 // TaskType identifies the kind of LLM request within a file subtask.
@@ -188,7 +189,7 @@ func (sh *SessionHistory) WriteFindings(findings []Finding) {
 
 // New creates a new SessionHistory with the given repo directory.
 func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
-	sessionID := generateUUID()
+	sessionID := uuid.V4()
 	sh := &SessionHistory{
 		SessionID:  sessionID,
 		RepoDir:    repoDir,
