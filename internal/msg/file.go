@@ -41,21 +41,25 @@ const (
 	StubEvicted StubReason = "evicted"
 )
 
-// Lower renders the full tool result, or — once stubbed — a pointer that keeps
-// the tool_call pairing valid while spending no meaningful tokens.
+// Lower renders the full content, or — once stubbed — a pointer that keeps the
+// message's wire shape (a tool_result stays a paired tool_result, a briefing
+// preload stays a user message) while spending no meaningful tokens.
 func (f *File) Lower() llm.Message {
+	var text string
 	switch f.stubbed {
 	case StubSuperseded:
-		return llm.NewToolResultMessage(f.wire.ToolCallID,
-			fmt.Sprintf("File: %s lines %d-%d — superseded by a later read of the same content below; elided.",
-				f.Path, f.Start, f.End))
+		text = fmt.Sprintf("File: %s lines %d-%d — superseded by a later read of the same content below; elided.",
+			f.Path, f.Start, f.End)
 	case StubEvicted:
-		return llm.NewToolResultMessage(f.wire.ToolCallID,
-			fmt.Sprintf("File: %s lines %d-%d — elided to fit the context budget; call file_read again if you still need it.",
-				f.Path, f.Start, f.End))
+		text = fmt.Sprintf("File: %s lines %d-%d — elided to fit the context budget; call file_read again if you still need it.",
+			f.Path, f.Start, f.End)
 	default:
 		return f.wire
 	}
+	if f.wire.Role == "tool" {
+		return llm.NewToolResultMessage(f.wire.ToolCallID, text)
+	}
+	return llm.NewTextMessage(f.wire.Role, text)
 }
 
 // Stub elides the content with the given reason (idempotent; the first reason
@@ -85,6 +89,20 @@ var fileReadHeader = regexp.MustCompile(`^File: (.+) \(Total lines: (\d+)\)\nIS_
 
 // FileReadToolName is the tool whose results are promoted to File messages.
 const FileReadToolName = "file_read"
+
+// NewFile builds a File whose content entered the conversation OUTSIDE the
+// tool protocol — a briefing preload carried as a user-role message. Same
+// identity, same dedup/evict participation; only the wire shape differs (no
+// tool_call pairing to preserve).
+func NewFile(path string, start, end, total int, content string) *File {
+	return &File{
+		Path:  path,
+		Start: start,
+		End:   end,
+		Total: total,
+		wire:  llm.NewTextMessage("user", content),
+	}
+}
 
 // FileFromToolResult promotes a file_read tool result into a *File. Returns
 // (nil, false) for other tools or when the result doesn't carry the expected

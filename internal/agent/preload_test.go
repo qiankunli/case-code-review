@@ -8,6 +8,10 @@ import (
 	"testing"
 
 	"github.com/qiankunli/case-code-review/internal/feature"
+	"github.com/qiankunli/case-code-review/internal/llm"
+	"github.com/qiankunli/case-code-review/internal/llmloop"
+	"github.com/qiankunli/case-code-review/internal/msg"
+	"github.com/qiankunli/case-code-review/internal/session"
 	"github.com/qiankunli/case-code-review/internal/tool"
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
@@ -168,5 +172,68 @@ func TestBrieferFor_Scopes(t *testing.T) {
 		if m.prio > 0 {
 			t.Fatalf("gate off must drop neighbor materials, got %+v", m)
 		}
+	}
+}
+
+func TestAssembleTypedBriefing(t *testing.T) {
+	build := func(unitSlot, relatedSlot string) []llm.Message {
+		return []llm.Message{
+			llm.NewTextMessage("system", "sys"),
+			llm.NewTextMessage("user", "task\n[unit:"+unitSlot+"]\n[rel:"+relatedSlot+"]"),
+		}
+	}
+	pieces := []piece{
+		{prio: 0, text: "File: a.go (Total lines: 2)\n1|x\n2|y\n\n", path: "a.go", start: 1, end: 2, tot: 2},
+		{prio: 0, text: "File: big.go — 99999 bytes exceeds the preload budget; read on demand via file_read\n\n"},
+		{prio: 1, text: "// caller n.go::C\nFile: n.go (Total lines: 9)\nLINE_RANGE: 5-9\n5|z\n6|z\n7|z\n8|z\n9|z\n\n", path: "n.go", start: 5, end: 9, tot: 9},
+	}
+	a := &Agent{}
+
+	// Roomy limit: [system, task, ownFile, relatedFile], pointers + note in slots.
+	deb := session.Debrief{}
+	domain := a.assembleTypedBriefing(build, pieces, 1<<20, &deb)
+	if len(domain) != 4 {
+		t.Fatalf("want 4 messages, got %d", len(domain))
+	}
+	task := domain[1].Lower()
+	taskText := task.ExtractText()
+	if !strings.Contains(taskText, typedUnitSourcePointer) ||
+		!strings.Contains(taskText, "exceeds the preload budget") ||
+		!strings.Contains(taskText, typedRelatedPointer) {
+		t.Fatalf("task slots off:\n%s", taskText)
+	}
+	own, ok := domain[2].(*msg.File)
+	if !ok || own.Path != "a.go" || own.End != 2 {
+		t.Fatalf("own File off: %#v", domain[2])
+	}
+	rel, ok := domain[3].(*msg.File)
+	if !ok || rel.Path != "n.go" || rel.Start != 5 {
+		t.Fatalf("related File off: %#v", domain[3])
+	}
+	if len(deb.Degradations) != 0 {
+		t.Fatalf("no degradation expected: %v", deb.Degradations)
+	}
+
+	// Just under the full size: related dropped first, its pointer gone.
+	fullTokens := llmloop.CountMessagesTokens(msg.Lower(domain))
+	deb = session.Debrief{}
+	domain = a.assembleTypedBriefing(build, pieces, fullTokens-1, &deb)
+	if len(domain) != 3 || len(deb.Degradations) != 1 || deb.Degradations[0] != "related_source_dropped" {
+		t.Fatalf("related-drop stage off: n=%d deg=%v", len(domain), deb.Degradations)
+	}
+	w1 := domain[1].Lower()
+	if strings.Contains(w1.ExtractText(), typedRelatedPointer) {
+		t.Fatal("dropped related must not be advertised in the slot")
+	}
+
+	// Tiny limit: own dropped too — sentinel appears, no File messages left.
+	deb = session.Debrief{}
+	domain = a.assembleTypedBriefing(build, pieces, 10, &deb)
+	w2 := domain[1].Lower()
+	if len(domain) != 2 || !strings.Contains(w2.ExtractText(), sourceNotPreloaded) {
+		t.Fatalf("own-drop stage off: n=%d\n%s", len(domain), w2.ExtractText())
+	}
+	if len(deb.Degradations) != 2 {
+		t.Fatalf("want both degradations, got %v", deb.Degradations)
 	}
 }
