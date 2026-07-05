@@ -24,12 +24,14 @@ import (
 	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/llmloop"
 	"github.com/qiankunli/case-code-review/internal/model"
+	"github.com/qiankunli/case-code-review/internal/msg"
 	"github.com/qiankunli/case-code-review/internal/session"
 	"github.com/qiankunli/case-code-review/internal/spec"
 	"github.com/qiankunli/case-code-review/internal/stdout"
 	"github.com/qiankunli/case-code-review/internal/telemetry"
 	"github.com/qiankunli/case-code-review/internal/tool"
 	"github.com/qiankunli/case-code-review/internal/unit"
+	"github.com/qiankunli/go-stdx/slicesx"
 )
 
 // AgentWarning is re-exported from llmloop for backwards compatibility with
@@ -171,13 +173,6 @@ type Agent struct {
 	// for call-graph greps) so the briefing's usage-sites grep — same cost class —
 	// rides the same gate. Set in splitUnits, read by renderUsageSites.
 	costlyContext bool
-	// pendingDebriefs queues each unit's debrief until CommentWorkerPool.Await():
-	// async comment processing (relocation) appends task records to the unit's
-	// scope AFTER RunPerFile returns, so writing the debrief there would both
-	// race those records' field writes and undercount the cost rollup. Flushed
-	// in dispatchUnits once the pool is drained.
-	debriefMu       sync.Mutex
-	pendingDebriefs []pendingDebrief
 	// repoMap is the run-level ranked symbol map (computed once in
 	// dispatchUnits, shared by every unit's prompt — like background/rule).
 	// It exists to stop the reviewer from guessing symbol names in searches:
@@ -281,6 +276,8 @@ func New(args Args) *Agent {
 		CommentWorkerPool: args.CommentWorkerPool,
 		Session:           args.Session,
 		RelocationEnabled: f.Enabled(feature.Relocation),
+		FileDedupEnabled:  f.Enabled(feature.FileDedup),
+		FileEvictEnabled:  f.Enabled(feature.FileEvict),
 		DiffLookup:        a.findDiff,
 	})
 	return a
@@ -508,6 +505,11 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 					telemetry.ErrorEvent(ctx, "unit.panic", fmt.Errorf("panic: %v", r),
 						telemetry.AnyToAttr("file.path", u.Path()))
 					a.recordWarning("unit_error", u.Path(), fmt.Sprintf("panic: %v", r))
+					// The unit never reached its own Close — end the lifecycle
+					// here so the panic is visible in debriefs, not just logs.
+					a.session.CloseScope(
+						session.Scope{ID: u.ID, Kind: "unit", Type: string(u.Scope), Paths: u.Paths()},
+						session.Debrief{Formed: string(u.Formed), Outcome: "panic", Reason: fmt.Sprintf("%v", r)})
 				}
 			}()
 
@@ -540,10 +542,6 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 	if a.args.CommentWorkerPool != nil {
 		a.args.CommentWorkerPool.Await()
 	}
-
-	// Pool drained → every scope's task records (incl. async relocation rounds)
-	// are final; debriefs can now aggregate them race-free and complete.
-	a.flushDebriefs()
 
 	failed := atomic.LoadInt64(&a.unitFailed)
 	if failed > 0 && failed == dispatched {
@@ -731,17 +729,9 @@ func (a *Agent) findClues(u unit.Unit, includeCostly bool) unit.Dossier {
 
 // dedupClues drops duplicate clues (same relation+kind+text), keeping first seen.
 func dedupClues(clues unit.Dossier) unit.Dossier {
-	seen := make(map[string]bool, len(clues))
-	out := clues[:0]
-	for _, c := range clues {
-		key := string(c.Relation) + "\x00" + string(c.Kind) + "\x00" + c.Text
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, c)
-	}
-	return out
+	return slicesx.UniqBy(clues, func(c unit.Clue) string {
+		return string(c.Relation) + "\x00" + string(c.Kind) + "\x00" + c.Text
+	})
 }
 
 // renderClues groups a Dossier into the prompt's context blocks by clue Kind: the
@@ -919,7 +909,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		return messages
 	}
 
-	unitSource, relatedSource, materialOutcomes := a.renderMaterials(ctx, a.brieferFor(u.Scope).materials(u))
+	mats := a.brieferFor(u.Scope).materials(u)
 
 	// The debrief is this unit's terminal record: what only this moment knows
 	// (formation, briefing fate, outcome) — post-hoc analysis can't rebuild it.
@@ -931,29 +921,42 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		Deletions:  u.Deletions(),
 		Clues:      countClues(u.Dossier),
 		ClueRefs:   clueRefs(u.Dossier),
-		Materials:  materialOutcomes,
 		UsageSites: usageCount,
 	}
 
-	messages := buildMessages(unitSource, relatedSource)
 	maxAllowed := a.args.Template.MaxTokens
 	tokenLimit := maxAllowed * 4 / 5 // 80% of MaxTokens
-	// The preload is an optimization, never the reason a unit gets skipped by the
-	// token guard below — degrade stepwise (drop the context-only bodies first,
-	// then the own source) and let the reviewer fetch on demand via file_read
-	// before giving up on the unit.
-	if relatedSource != "" && llmloop.CountMessagesTokens(messages) > tokenLimit {
-		relatedSource = ""
-		messages = buildMessages(unitSource, relatedSource)
-		deb.Degradations = append(deb.Degradations, "related_source_dropped")
-	}
-	if unitSource != sourceNotPreloaded && llmloop.CountMessagesTokens(messages) > tokenLimit {
-		unitSource = sourceNotPreloaded
-		messages = buildMessages(unitSource, relatedSource)
-		deb.Degradations = append(deb.Degradations, "unit_source_dropped")
+
+	// Two briefing shapes behind the typed_briefing gate. Both degrade stepwise
+	// under the token limit (drop the context-only bodies first, then the own
+	// source) — the preload is an optimization, never the reason a unit gets
+	// skipped by the token guard below.
+	var domain []msg.Msg
+	if a.features.Enabled(feature.TypedBriefing) {
+		// Typed shape: [template messages, own Files, related Files] — preloads
+		// are per-file msg.File messages, so file_dedup/file_evict cover them.
+		pieces, outs := a.renderPieces(ctx, mats)
+		deb.Materials = outs
+		domain = a.assembleTypedBriefing(buildMessages, pieces, tokenLimit, &deb)
+	} else {
+		// Classic shape: preloads inlined into the task message's template slots.
+		unitSource, relatedSource, outs := a.renderMaterials(ctx, mats)
+		deb.Materials = outs
+		messages := buildMessages(unitSource, relatedSource)
+		if relatedSource != "" && llmloop.CountMessagesTokens(messages) > tokenLimit {
+			relatedSource = ""
+			messages = buildMessages(unitSource, relatedSource)
+			deb.Degradations = append(deb.Degradations, "related_source_dropped")
+		}
+		if unitSource != sourceNotPreloaded && llmloop.CountMessagesTokens(messages) > tokenLimit {
+			unitSource = sourceNotPreloaded
+			messages = buildMessages(unitSource, relatedSource)
+			deb.Degradations = append(deb.Degradations, "unit_source_dropped")
+		}
+		domain = msg.Wrap(messages)
 	}
 
-	tokenCount := llmloop.CountMessagesTokens(messages)
+	tokenCount := llmloop.CountMessagesTokens(msg.Lower(domain))
 	if tokenCount > tokenLimit {
 		msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d)", tokenCount, 80, maxAllowed)
 		fmt.Fprintf(stdout.Writer(), "[ccr] WARNING: %s for %s\n", msg, newPath)
@@ -965,62 +968,32 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		// A governor's decision, not a failure — the debrief must keep the two
 		// distinguishable (lowering the threshold shifts skips, not the fault rate).
 		deb.Outcome, deb.Reason = "skipped_policy", msg
-		a.queueDebrief(sc, deb)
+		a.session.CloseScope(sc, deb)
 		return nil
 	}
 
 	// REVIEW_FILTER_TASK is NOT run here: it is a file-level post-pass
 	// (runReviewFilters), so sibling Units of the same file don't filter each
 	// other's comments against the wrong diff slice.
-	outcome, err := a.runner.RunPerFile(ctx, messages, sc)
+	outcome, err := a.runner.RunPerFile(ctx, domain, sc)
 	deb.Outcome, deb.Reason = outcome.State, outcome.Reason
-	a.queueDebrief(sc, deb)
+	// Close ends the unit's lifecycle: the debrief persists now, or — when
+	// async comment work is still in flight — the moment its last task ends.
+	a.session.CloseScope(sc, deb)
 	return err
-}
-
-// pendingDebrief is a unit's debrief awaiting the post-Await flush (see the
-// Agent.pendingDebriefs field for why it can't be written at unit end).
-type pendingDebrief struct {
-	sc  session.Scope
-	deb session.Debrief
-}
-
-// queueDebrief parks a unit's debrief for the post-Await flush. Units run
-// concurrently, hence the lock.
-func (a *Agent) queueDebrief(sc session.Scope, deb session.Debrief) {
-	a.debriefMu.Lock()
-	defer a.debriefMu.Unlock()
-	a.pendingDebriefs = append(a.pendingDebriefs, pendingDebrief{sc: sc, deb: deb})
-}
-
-// flushDebriefs writes all queued debriefs. Must run after the unit goroutines
-// are joined AND CommentWorkerPool.Await() — only then have all of a scope's
-// task records (including async relocation rounds) stopped mutating, so the
-// cost rollup is complete and race-free.
-func (a *Agent) flushDebriefs() {
-	a.debriefMu.Lock()
-	pending := a.pendingDebriefs
-	a.pendingDebriefs = nil
-	a.debriefMu.Unlock()
-	for _, p := range pending {
-		a.session.WriteDebrief(p.sc, p.deb)
-	}
 }
 
 // clueRefs collects the deduped symbol-ids a dossier points at, in dossier
 // order — the debrief keeps content, not just counts (coverage counts can stay
 // flat while every pointed-at symbol changes).
 func clueRefs(clues unit.Dossier) []string {
-	seen := map[string]bool{}
-	var out []string
+	var refs []string
 	for _, c := range clues {
-		if c.Ref == "" || seen[c.Ref] {
-			continue
+		if c.Ref != "" {
+			refs = append(refs, c.Ref)
 		}
-		seen[c.Ref] = true
-		out = append(out, c.Ref)
 	}
-	return out
+	return slicesx.Uniq(refs)
 }
 
 // fileReader unwraps the file_read tool's FileReader so the preload reads exactly

@@ -47,7 +47,7 @@
 
 ### 2.5 复测操作法（treatment 后怎么再测）
 
-- **同工作负载重放**：历史 PR 用 merge commit 的双亲重建评审范围——`ccr review --from <merge>^1 --to <merge>^2`。分支已合并时 merge-base 会退化成分支自身，必须用 merge 双亲。
+- **同工作负载重放**：历史 PR 用 merge commit 的双亲重建评审范围——`ccr review --from <merge>^1 --to <merge>^2`。分支已合并时 merge-base 会退化成分支自身，必须用 merge 双亲。**已固化为 `eval/replay.py`**：corpus（冻结的评审范围集，如 `eval/corpus/ccr-self.json`）× arms（feature gate 配置）矩阵重放，按 CCR_EVAL_TAG 捞回 transcript，聚合 finding（指纹精确 + path/symbol 宽松两档匹配）与 debrief 成本出对比报告——默认关 gate（如 `typed_briefing`）的"翻转许可证"走这里。
 - **组合效果 vs 单项归因**：多个治理项同时上线时，端到端复测只能给**组合**效果；某一项"零触发/零变化"不等于没用（实例：repo_map 在源头消灭瞎猜后，search-suggest 一次都没触发——它退化成保险网，不是失效）。单项归因一律走 feature gate 消融（`--feature x=off` 的 dry-run json 或真跑）。
 - **引擎类改动比内容不比计数**：换解析引擎（如 grep→typed graph）时 coverage 计数往往不变，变的是 clue **指向哪些符号**——从 dry-run json 的 `spec_cases`/`see_also` 文本抽 symbol-id 集合做对比，噪声符号（同名撞车、测试函数混入）一眼可见。
 - **自举信号**：ccr review 自己的改动 PR，其 findings 是免费的质量样本——它抓过自己代码里的死 API 和仓库惯例违例；被评估工具评估自己，既是 dogfood 也是回归观测。
@@ -114,8 +114,19 @@
 - **Finding**（每条最终交付的 finding 一条记录，过滤后写；transcript 里的 code_comment tool call 是过滤前的，会多算）：`fingerprint`（path+content 的短 hash，**刻意不含行号**——relocation 和后续编辑会挪行，指纹的职责是让复跑复现的同一 finding join 到同一人工标注）+ `symbol_id` + 行区间；配 manifest 的 `git_head` 锚点，后验扫描从这里向前走 git 历史（"后续 commit 是否改了 finding 指过的行/符号" → important 实锤 / 漏报候选）。
 - **后验扫描脚本**：`eval/posterior.py <session.jsonl|dir> [--labels out.jsonl]`——按锚点（diffCommit > diffTo > git_head）对每条 finding 走 git line-log，判 `line_touched`（实锤候选，附 commit）/ `file_touched` / `untouched`；候选仍需人工对照 commit 与 finding 文本确认（§2 判定纪律）。首次自验：dogfood session 的两条 os.Stderr finding 精确指回修它们的 commit。
 
+### 9. typed_briefing 翻转许可证（2026-07-05，replay.py 首次全量应用）
+
+`eval/replay.py` 对 ccr-self corpus（6 PR × base/typed × 2 runs，70 unit/arm）的判定：
+
+- **健壮性（决定性）**：timeout 截断 9 → 3（llm_error +1）；#93 最典型——base 5 个 timeout、typed 0。机理：预载成为 File 消息后参与 dedup/evict，context 压力下少跑 LLM 压缩、少撞 600s 墙。
+- **成本**：prompt token 6.23M → 6.02M（-3.3%，且 base 被 timeout 天花板低估）；rounds 473 vs 462，持平。冒烟那个 -61% 未复现——单小 commit 的偶然，再证 n=1 不可信。
+- **准确性**：finding 层噪声主导（同 arm 两 run 指纹零重合），无系统性回退证据；两 arm 各抓到一条 evict 家族真问题（base 抓到的快照竞态经人工核实为真 → 修复 PR，**回归集自审首次产出实锤 bug**）。
+- 方法论注：run 间 finding 零重合说明质量轴在小 corpus 上只能判"无回退"、不能判优劣——精细质量对比需要更大 corpus 或按 finding 家族聚合。
+
 ## References
 
 - ATIF 导出：`ccr export --format atif <session.jsonl>`（session 落盘位置见 `internal/session/`）
 - 失败分类法与 per-chain 判定：`eval/trajectory_judge.py` 顶部 docstring
+- 固定回归集重放：`eval/replay.py`（corpus × arms）· corpus 定义：`eval/corpus/`（merge 双亲，仓库相对，可入库；跑出的产物不入库）
+- 后验扫描：`eval/posterior.py`（finding → line_touched/file_touched/untouched）
 - unit / context 模型：`docs/unit-model.md` · `docs/context-model.md`

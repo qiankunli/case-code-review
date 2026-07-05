@@ -2,15 +2,15 @@ package session
 
 import (
 	"bufio"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/qiankunli/go-stdx/uuid"
 )
 
 // sessionSubDir is the subdirectory under ~/.casecodereview that holds session
@@ -64,19 +64,6 @@ func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOpt
 		return nil, err
 	}
 	return jw, nil
-}
-
-func generateUUID() string {
-	b := make([]byte, 16)
-	_, err := io.ReadFull(rand.Reader, b)
-	if err != nil {
-		// Fallback — extremely unlikely but keeps things working without panics.
-		return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
-	}
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // variant 1
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 func encodeRepoPath(p string) string {
@@ -155,7 +142,7 @@ func (jw *jsonlWriter) writeRecordLocked(rec map[string]any) {
 
 // WriteSessionStart writes the initial session_start record.
 func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
-	uuid := generateUUID()
+	uuid := uuid.V4()
 	rec := map[string]any{
 		"uuid":           uuid,
 		"parentUuid":     nil,
@@ -216,7 +203,7 @@ func addScopeFields(rec map[string]any, ss *ScopeSession) {
 
 // WriteLLMRequest writes a request entry with the resolved messages.
 func (jw *jsonlWriter) WriteLLMRequest(ss *ScopeSession, taskType TaskType, requestNo int, messages any) string {
-	uuid := generateUUID()
+	uuid := uuid.V4()
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
@@ -238,7 +225,7 @@ func (jw *jsonlWriter) WriteLLMRequest(ss *ScopeSession, taskType TaskType, requ
 
 // WriteLLMResponse writes a response entry with model, content, tool calls, usage.
 func (jw *jsonlWriter) WriteLLMResponse(ss *ScopeSession, taskType TaskType, content string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration) string {
-	uuid := generateUUID()
+	uuid := uuid.V4()
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
@@ -268,7 +255,7 @@ func (jw *jsonlWriter) WriteLLMResponse(ss *ScopeSession, taskType TaskType, con
 
 // WriteLLMError writes an llm_error entry recording a failed LLM request.
 func (jw *jsonlWriter) WriteLLMError(ss *ScopeSession, taskType TaskType, requestNo int, errorMsg string, duration time.Duration) string {
-	uuid := generateUUID()
+	uuid := uuid.V4()
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
@@ -291,7 +278,7 @@ func (jw *jsonlWriter) WriteLLMError(ss *ScopeSession, taskType TaskType, reques
 
 // WriteToolCall writes a tool call result entry.
 func (jw *jsonlWriter) WriteToolCall(ss *ScopeSession, taskType TaskType, toolName, arguments, result string, ok bool, duration time.Duration) string {
-	uuid := generateUUID()
+	uuid := uuid.V4()
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
@@ -317,7 +304,7 @@ func (jw *jsonlWriter) WriteToolCall(ss *ScopeSession, taskType TaskType, toolNa
 // WriteDebrief writes a unit's terminal "debrief" record (see Debrief).
 // Empty optional groups are omitted so the record stays greppable and small.
 func (jw *jsonlWriter) WriteDebrief(ss *ScopeSession, d Debrief) string {
-	uuid := generateUUID()
+	uuid := uuid.V4()
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
@@ -368,7 +355,7 @@ func (jw *jsonlWriter) WriteDebrief(ss *ScopeSession, d Debrief) string {
 
 // WriteFinding writes one delivered finding as a "finding" record (see Finding).
 func (jw *jsonlWriter) WriteFinding(f Finding) string {
-	uuid := generateUUID()
+	uuid := uuid.V4()
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
@@ -404,7 +391,7 @@ type diffStats struct {
 
 // WriteSessionEnd writes the final session_end summary record and closes the file.
 func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, stats diffStats) {
-	uuid := generateUUID()
+	uuid := uuid.V4()
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/llm"
+	"github.com/qiankunli/go-stdx/uuid"
 )
 
 // TaskType identifies the kind of LLM request within a file subtask.
@@ -79,7 +80,25 @@ type ScopeSession struct {
 	Path        string   // representative member path; comment anchor / log label
 	TaskRecords map[TaskType][]*TaskRecord
 	session     *SessionHistory // back-reference for JSONL persistence
+
+	// Unit lifecycle (docs/unit-model.md 关键设计 8): open → closing (Close
+	// called, async still in flight) → closed (debrief persisted). Scopes that
+	// never Close (scan / file-level passes) just stay open — the lifecycle is
+	// opt-in for scopes that produce a debrief.
+	state         scopeState
+	pendingAsync  int      // async tasks registered via BeginAsync, not yet ended
+	parkedDebrief *Debrief // held while closing until the last async task ends
+	lateWrites    int      // records appended after close — a detectable misuse
 }
+
+// scopeState is the unit lifecycle state.
+type scopeState int
+
+const (
+	scopeOpen scopeState = iota
+	scopeClosing
+	scopeClosed
+)
 
 // Scope identifies a review sub-session for recording: a Unit, or a file-level
 // pass. Callers build it from a unit.Unit (review) or a file path (review_filter
@@ -188,7 +207,7 @@ func (sh *SessionHistory) WriteFindings(findings []Finding) {
 
 // New creates a new SessionHistory with the given repo directory.
 func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
-	sessionID := generateUUID()
+	sessionID := uuid.V4()
 	sh := &SessionHistory{
 		SessionID:  sessionID,
 		RepoDir:    repoDir,
@@ -268,6 +287,14 @@ func (sh *SessionHistory) Finalize() {
 func (ss *ScopeSession) AppendTaskRecord(taskType TaskType, messages []llm.Message) *TaskRecord {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
+
+	// A write after close means some worker outlived the scope's declared end —
+	// the record is kept (losing data helps nobody) but the misuse is counted
+	// and voiced, because it also escaped the debrief's cost rollup.
+	if ss.state == scopeClosed {
+		ss.lateWrites++
+		fmt.Printf("[ccr session] warning: %s record appended to closed scope %q\n", taskType, ss.ID)
+	}
 
 	rec := &TaskRecord{
 		Type:            taskType,
@@ -386,6 +413,15 @@ func (tr *TaskRecord) SetError(err error, duration time.Duration) {
 		}
 		atomic.AddInt64(&ss.session.llmFailures, 1)
 	}
+}
+
+// LateWrites reports how many records were appended after the scope closed —
+// zero in a correct run; a positive count means some async worker escaped the
+// lifecycle (and the debrief undercounts it).
+func (ss *ScopeSession) LateWrites() int {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.lateWrites
 }
 
 // LLMFailures returns the total number of LLM request failures recorded during this session.

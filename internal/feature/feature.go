@@ -35,6 +35,14 @@ const (
 	UsageSites     Gate = "usage_sites"     // pre-grepped use sites of the changed symbols
 	RangedPreload  Gate = "ranged_preload"  // over-budget file fallback: inline the unit's function bodies
 	NeighborSource Gate = "neighbor_source" // callchain briefing: inline caller/callee neighbor bodies
+	FileDedup      Gate = "file_dedup"      // stub earlier file_read results superseded by a later covering read
+	FileEvict      Gate = "file_evict"      // under token pressure, shed re-derivable file content before LLM compression
+
+	// TypedBriefing: briefing preloads as per-file messages. Flipped ON by the
+	// corpus replay A/B (eval/README §9): timeouts 9→3 across 70 units/arm
+	// (robustness win via File dedup/evict covering preloads), cost flat, no
+	// quality regression evidence.
+	TypedBriefing Gate = "typed_briefing"
 )
 
 // def is a gate's registry entry: default state + one-line description.
@@ -64,6 +72,9 @@ var registry = map[Gate]def{
 	UsageSites:     {true, "pre-grepped use sites of the changed symbols in the briefing"},
 	RangedPreload:  {true, "over-budget file fallback: inline the unit's function bodies"},
 	NeighborSource: {true, "callchain briefing: inline caller/callee neighbor bodies"},
+	FileDedup:      {true, "stub earlier file_read results superseded by a later covering read"},
+	FileEvict:      {true, "under token pressure, shed re-derivable file content before LLM compression"},
+	TypedBriefing:  {true, "briefing preloads as per-file messages (File dedup/evict cover preloads)"},
 }
 
 // Set is a resolved gate configuration. nil is valid and means "all defaults".

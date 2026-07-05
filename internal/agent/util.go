@@ -2,13 +2,11 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/session"
 )
 
@@ -31,62 +29,6 @@ var planBlockPattern = regexp.MustCompile(
 // failed. Strip is a no-op when the wrapper is absent.
 func stripEmptyPlanBlock(content string) string {
 	return planBlockPattern.ReplaceAllString(content, "")
-}
-
-// stripMarkdownFences removes ```json and ``` wrappers that some models
-// add around structured outputs.
-func stripMarkdownFences(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		if nl := strings.IndexByte(s, '\n'); nl >= 0 {
-			s = s[nl+1:]
-		} else {
-			s = strings.TrimPrefix(s, "```json")
-			s = strings.TrimPrefix(s, "```")
-		}
-	}
-	s = strings.TrimSpace(s)
-	if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimSpace(s)
-	}
-	return s
-}
-
-func buildMessageXML(msgs []llm.Message) string {
-	var sb strings.Builder
-	for i, m := range msgs {
-		sb.WriteString(fmt.Sprintf("<message id=\"%d\" role=\"%s\">\n", i, m.Role))
-		sb.WriteString("    <content>\n")
-		sb.WriteString(fmt.Sprintf("      %s\n", m.ExtractText()))
-		sb.WriteString("    </content>\n")
-		sb.WriteString("</message>")
-		if i < len(msgs)-1 {
-			sb.WriteString("\n")
-		}
-	}
-	return sb.String()
-}
-
-func copyMessages(msgs []llm.Message) []llm.Message {
-	out := make([]llm.Message, len(msgs))
-	for i, m := range msgs {
-		out[i] = llm.Message{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  append([]llm.ToolCall(nil), m.ToolCalls...),
-		}
-	}
-	return out
-}
-
-func countMessagesTokens(msgs []llm.Message) int {
-	var total int
-	for _, m := range msgs {
-		total += llm.CountTokens(m.ExtractText())
-	}
-	return total
 }
 
 func reviewModeString(from, to, commit string) string {
