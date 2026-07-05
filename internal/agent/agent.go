@@ -31,6 +31,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/telemetry"
 	"github.com/qiankunli/case-code-review/internal/tool"
 	"github.com/qiankunli/case-code-review/internal/unit"
+	"github.com/qiankunli/case-code-review/pkg/stdx/slicesx"
 )
 
 // AgentWarning is re-exported from llmloop for backwards compatibility with
@@ -734,17 +735,9 @@ func (a *Agent) findClues(u unit.Unit, includeCostly bool) unit.Dossier {
 
 // dedupClues drops duplicate clues (same relation+kind+text), keeping first seen.
 func dedupClues(clues unit.Dossier) unit.Dossier {
-	seen := make(map[string]bool, len(clues))
-	out := clues[:0]
-	for _, c := range clues {
-		key := string(c.Relation) + "\x00" + string(c.Kind) + "\x00" + c.Text
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, c)
-	}
-	return out
+	return slicesx.UniqBy(clues, func(c unit.Clue) string {
+		return string(c.Relation) + "\x00" + string(c.Kind) + "\x00" + c.Text
+	})
 }
 
 // renderClues groups a Dossier into the prompt's context blocks by clue Kind: the
@@ -1027,16 +1020,13 @@ func (a *Agent) flushDebriefs() {
 // order — the debrief keeps content, not just counts (coverage counts can stay
 // flat while every pointed-at symbol changes).
 func clueRefs(clues unit.Dossier) []string {
-	seen := map[string]bool{}
-	var out []string
+	var refs []string
 	for _, c := range clues {
-		if c.Ref == "" || seen[c.Ref] {
-			continue
+		if c.Ref != "" {
+			refs = append(refs, c.Ref)
 		}
-		seen[c.Ref] = true
-		out = append(out, c.Ref)
 	}
-	return out
+	return slicesx.Uniq(refs)
 }
 
 // fileReader unwraps the file_read tool's FileReader so the preload reads exactly

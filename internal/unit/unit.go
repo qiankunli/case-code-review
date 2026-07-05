@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/qiankunli/case-code-review/internal/model"
+	"github.com/qiankunli/case-code-review/pkg/stdx/slicesx"
 )
 
 // Scope is how a Unit's Fragments were grouped — set when the Unit is formed.
@@ -115,15 +116,13 @@ func (u Unit) Path() string {
 
 // Paths returns each distinct member file path (for the change-files exclusion).
 func (u Unit) Paths() []string {
-	seen := map[string]bool{}
-	var out []string
+	var paths []string
 	for _, f := range u.Fragments {
-		if f.Path != "" && !seen[f.Path] {
-			seen[f.Path] = true
-			out = append(out, f.Path)
+		if f.Path != "" {
+			paths = append(paths, f.Path)
 		}
 	}
-	return out
+	return slicesx.Uniq(paths)
 }
 
 // Diff is the diff the Unit reviews: a single Fragment's slice as-is, or — for a

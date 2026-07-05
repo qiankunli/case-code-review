@@ -22,6 +22,7 @@
 ```
 case-code-review/
 ├── cmd/ccr/        CLI 入口：review/scan/config/… 子命令；组装 Args、加载 spec.json
+├── pkg/stdx/       跨项目通用工具孵化地（"stdlib extensions"：stdlib 没有的才收；子包镜像 stdlib 命名 slicesx/uuid/…；零依赖，稳定后抽独立仓给 hostel 等复用）
 └── internal/
     ├── unit/       ★ 两类型两阶段：`Fragment`（原子，Splitter 产：Go go/ast、Python python3）→ Merger 归并成 `Unit`（评审作用域，WatermarkMerger）；context 抽象 Clue(kind×relation) / ClueFinder / Dossier（merge 后挂 `Unit.Dossier`，去重后喂 loop）。详见 `docs/unit-model.md` + `docs/context-model.md`
     ├── spec/       ★ 消费 spec.json：SpecFinder/RuleFinder/LinkFinder 把 spec/case/rule/link 找成 Clue（廉价 finder）
@@ -45,12 +46,14 @@ diff ─Splitter─▶ Fragment ─Merger─▶ Unit ─ClueFinder 找 Clue(spec
 >
 > **Clue / ClueFinder**：context 抽象的三件——找的动作（`ClueFinder.Find(u Unit) []Clue`，对评审作用域 Unit 找）、找的结果（`Clue{Kind, Text, Ref}`，Text 内联 / Ref 按需指针）、挂哪（`Unit.Clues`，merge 后收）。加一类 context = 加一个 finder，不动主链路。
 
-## 关键约定（核心四条）
+## 关键约定（核心五条）
 
 1. **评审语义 = 契约守恒，不是找语法 bug**：核对 diff 有没有破坏函数的 spec/case/rule 不变量；**语法 / 静态检查交给 lint 类工具**（Python `ruff`、Go `go build`/`go vet` 之类），不是 ccr 的活。
 2. **diff unit vs review unit 别混**：Splitter 从 diff 切出 diff unit；Merger 归并成 review unit（触发 loop 的那个，可能是单个、也可能是几个沿阶梯归并的更粗 unit）。成本超水位按文件归并——**降 loop 粒度、不降 context**。
 3. **边界现场算、`spec.json` 只语义**：函数边界评审时现场解析（`go/ast`/`python3`）、**永不落盘**（不 stale）；`spec.json` 只有 `FuncID → spec/cases/rules/links`、**无行号**；join key 是 symbol-id `<relpath>::<symbol>`（与 spec-case 一致）。
 4. **上下文分廉价 / 昂贵两档，重活有闸**：廉价 finder（spec.json 查 spec/case/rule/link）总跑；昂贵 finder（caller/callee 的 call-graph grep）走**预算闸门**——diff unit 数超水位就跳（反正要归并、per-func 上下文也被稀释）。link 指向的 doc/函数**内容**仍按需 tool 取，不预塞。
+
+5. **通用操作不就地手写**：先查 stdlib（`slices`/`maps`/内置 `min`/`max`），stdlib 没有的查/进 `pkg/stdx`；第三方 common 库（samber/lo、bytedance/gopkg 等）已评估过暂不引——出现第三个"纯 transform 链"调用点再议。
 
 > 另：Go 改动先 `go build ./...` / `go test ./...` 再提交。
 

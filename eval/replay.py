@@ -90,7 +90,7 @@ def collect(path: Path) -> dict:
             out["findings"].append({
                 "fingerprint": o.get("fingerprint"),
                 "symbol_id": o.get("symbol_id") or "",
-                "path": o.get("path"),
+                "path": o.get("path") or "?",
                 "lines": f"{o.get('start_line')}-{o.get('end_line')}",
                 "content": (o.get("content") or "")[:100],
             })
@@ -109,8 +109,10 @@ def collect(path: Path) -> dict:
 
 
 def match_findings(base: list[dict], arm: list[dict]) -> dict:
-    bf = {f["fingerprint"] for f in base}
-    af = {f["fingerprint"] for f in arm}
+    # discard None fingerprints (pre-schema-v2 transcripts) — two unknowns must
+    # not count as the same finding
+    bf = {f["fingerprint"] for f in base if f["fingerprint"]}
+    af = {f["fingerprint"] for f in arm if f["fingerprint"]}
     bl = {(f["path"], f["symbol_id"]) for f in base}
     al = {(f["path"], f["symbol_id"]) for f in arm}
     return {
@@ -158,6 +160,7 @@ def main() -> int:
                     runlog.write(json.dumps({"entry": e["name"], "arm": arm_name, "run": i,
                                              **{k: (dict(v) if isinstance(v, Counter) else v) for k, v in r.items()}},
                                             ensure_ascii=False) + "\n")
+                    runlog.flush()
                     print(f"  ✓ units={r['units']} findings={len(r['findings'])} "
                           f"prompt_tok={r['prompt_tokens']} dur={r['duration_s']:.0f}s", flush=True)
 
