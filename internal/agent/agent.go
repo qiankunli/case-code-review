@@ -922,7 +922,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		return messages
 	}
 
-	unitSource, relatedSource, materialOutcomes := a.renderMaterials(ctx, a.brieferFor(u.Scope).materials(u))
+	mats := a.brieferFor(u.Scope).materials(u)
 
 	// The debrief is this unit's terminal record: what only this moment knows
 	// (formation, briefing fate, outcome) — post-hoc analysis can't rebuild it.
@@ -934,29 +934,42 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 		Deletions:  u.Deletions(),
 		Clues:      countClues(u.Dossier),
 		ClueRefs:   clueRefs(u.Dossier),
-		Materials:  materialOutcomes,
 		UsageSites: usageCount,
 	}
 
-	messages := buildMessages(unitSource, relatedSource)
 	maxAllowed := a.args.Template.MaxTokens
 	tokenLimit := maxAllowed * 4 / 5 // 80% of MaxTokens
-	// The preload is an optimization, never the reason a unit gets skipped by the
-	// token guard below — degrade stepwise (drop the context-only bodies first,
-	// then the own source) and let the reviewer fetch on demand via file_read
-	// before giving up on the unit.
-	if relatedSource != "" && llmloop.CountMessagesTokens(messages) > tokenLimit {
-		relatedSource = ""
-		messages = buildMessages(unitSource, relatedSource)
-		deb.Degradations = append(deb.Degradations, "related_source_dropped")
-	}
-	if unitSource != sourceNotPreloaded && llmloop.CountMessagesTokens(messages) > tokenLimit {
-		unitSource = sourceNotPreloaded
-		messages = buildMessages(unitSource, relatedSource)
-		deb.Degradations = append(deb.Degradations, "unit_source_dropped")
+
+	// Two briefing shapes behind the typed_briefing gate. Both degrade stepwise
+	// under the token limit (drop the context-only bodies first, then the own
+	// source) — the preload is an optimization, never the reason a unit gets
+	// skipped by the token guard below.
+	var domain []msg.Msg
+	if a.features.Enabled(feature.TypedBriefing) {
+		// Typed shape: [template messages, own Files, related Files] — preloads
+		// are per-file msg.File messages, so file_dedup/file_evict cover them.
+		pieces, outs := a.renderPieces(ctx, mats)
+		deb.Materials = outs
+		domain = a.assembleTypedBriefing(buildMessages, pieces, tokenLimit, &deb)
+	} else {
+		// Classic shape: preloads inlined into the task message's template slots.
+		unitSource, relatedSource, outs := a.renderMaterials(ctx, mats)
+		deb.Materials = outs
+		messages := buildMessages(unitSource, relatedSource)
+		if relatedSource != "" && llmloop.CountMessagesTokens(messages) > tokenLimit {
+			relatedSource = ""
+			messages = buildMessages(unitSource, relatedSource)
+			deb.Degradations = append(deb.Degradations, "related_source_dropped")
+		}
+		if unitSource != sourceNotPreloaded && llmloop.CountMessagesTokens(messages) > tokenLimit {
+			unitSource = sourceNotPreloaded
+			messages = buildMessages(unitSource, relatedSource)
+			deb.Degradations = append(deb.Degradations, "unit_source_dropped")
+		}
+		domain = msg.Wrap(messages)
 	}
 
-	tokenCount := llmloop.CountMessagesTokens(messages)
+	tokenCount := llmloop.CountMessagesTokens(msg.Lower(domain))
 	if tokenCount > tokenLimit {
 		msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d)", tokenCount, 80, maxAllowed)
 		fmt.Fprintf(stdout.Writer(), "[ccr] WARNING: %s for %s\n", msg, newPath)
@@ -975,7 +988,7 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	// REVIEW_FILTER_TASK is NOT run here: it is a file-level post-pass
 	// (runReviewFilters), so sibling Units of the same file don't filter each
 	// other's comments against the wrong diff slice.
-	outcome, err := a.runner.RunPerFile(ctx, msg.Wrap(messages), sc)
+	outcome, err := a.runner.RunPerFile(ctx, domain, sc)
 	deb.Outcome, deb.Reason = outcome.State, outcome.Reason
 	a.queueDebrief(sc, deb)
 	return err
