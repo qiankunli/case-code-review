@@ -283,6 +283,7 @@ func New(args Args) *Agent {
 		Session:           args.Session,
 		RelocationEnabled: f.Enabled(feature.Relocation),
 		FileDedupEnabled:  f.Enabled(feature.FileDedup),
+		FileEvictEnabled:  f.Enabled(feature.FileEvict),
 		DiffLookup:        a.findDiff,
 	})
 	return a

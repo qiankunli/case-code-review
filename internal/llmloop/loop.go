@@ -74,6 +74,11 @@ type Deps struct {
 	// feature gate): a later read covering an earlier one stubs the earlier
 	// copy in place, so the model pays for file content once.
 	FileDedupEnabled bool
+	// FileEvictEnabled gates eviction of File messages under token pressure
+	// (the file_evict feature gate): before paying for an LLM compression
+	// pass, shed the re-derivable slice of the context — file content the
+	// model can always read again.
+	FileEvictEnabled bool
 	// DiffLookup is consulted by the code_comment tool path to resolve
 	// line numbers against the file's diff (or against full file content
 	// in scan mode — scan adapters return a synthetic Diff whose
@@ -526,6 +531,16 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 
 	tokenCount := countMsgTokens(*messages)
 
+	// Over the warning threshold: shed re-derivable file content first (free,
+	// deterministic), and only summarize if that wasn't enough.
+	if tokenCount > warnLimit && r.deps.FileEvictEnabled {
+		if n := evictFiles(*messages, warnLimit); n > 0 {
+			telemetry.Event(ctx, "context.file_evict",
+				telemetry.AnyToAttr("file.path", sc.Path()),
+				telemetry.AnyToAttr("evicted", n))
+		}
+		tokenCount = countMsgTokens(*messages)
+	}
 	if tokenCount > warnLimit {
 		r.cancelPendingCompression()
 		*messages, _ = r.runCompression(ctx, *messages, sc)
@@ -561,6 +576,10 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	}
 
 	finalCount := countMsgTokens(*messages)
+	if finalCount > warnLimit && r.deps.FileEvictEnabled {
+		evictFiles(*messages, warnLimit)
+		finalCount = countMsgTokens(*messages)
+	}
 	if finalCount > warnLimit {
 		r.cancelPendingCompression()
 		*messages, _ = r.runCompression(ctx, *messages, sc)
