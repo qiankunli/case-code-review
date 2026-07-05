@@ -3,6 +3,7 @@ package llmloop
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -220,13 +221,6 @@ func buildMessageXML(msgs []llm.Message) string {
 	return sb.String()
 }
 
-// copyMessages creates a shallow copy of a message slice.
-func copyMessages(msgs []msg.Msg) []msg.Msg {
-	out := make([]msg.Msg, len(msgs))
-	copy(out, msgs)
-	return out
-}
-
 // runCompression performs three-zone memory compression on the given
 // messages, summarizing the compress zone while preserving the active zone
 // intact. Returns rebuilt as [frozen] + [compressed_summary appended to
@@ -300,7 +294,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []msg.Msg, sc session.
 
 // triggerAsyncCompression kicks off a background compression job.
 func (r *Runner) triggerAsyncCompression(ctx context.Context, messages []msg.Msg, sc session.Scope) {
-	msgSnapshot := copyMessages(messages)
+	msgSnapshot := slices.Clone(messages)
 
 	asyncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 
