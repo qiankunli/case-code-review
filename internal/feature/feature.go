@@ -36,6 +36,7 @@ const (
 	RangedPreload  Gate = "ranged_preload"  // over-budget file fallback: inline the unit's function bodies
 	NeighborSource Gate = "neighbor_source" // callchain briefing: inline caller/callee neighbor bodies
 	FileDedup      Gate = "file_dedup"      // stub earlier file_read results superseded by a later covering read
+	FileEvict      Gate = "file_evict"      // under token pressure, shed re-derivable file content before LLM compression
 )
 
 // def is a gate's registry entry: default state + one-line description.
@@ -66,6 +67,7 @@ var registry = map[Gate]def{
 	RangedPreload:  {true, "over-budget file fallback: inline the unit's function bodies"},
 	NeighborSource: {true, "callchain briefing: inline caller/callee neighbor bodies"},
 	FileDedup:      {true, "stub earlier file_read results superseded by a later covering read"},
+	FileEvict:      {true, "under token pressure, shed re-derivable file content before LLM compression"},
 }
 
 // Set is a resolved gate configuration. nil is valid and means "all defaults".

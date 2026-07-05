@@ -26,25 +26,49 @@ type File struct {
 	Total      int // total lines in the file at read time
 
 	wire    llm.Message // the original tool_result (role + ToolCallID preserved)
-	stubbed bool
+	stubbed StubReason  // "" = full content
 }
+
+// StubReason selects the pointer text a stubbed File lowers to — the model
+// must know WHY content vanished: a superseded copy points forward to the
+// newer read; an evicted one says how to get the content back.
+type StubReason string
+
+const (
+	// StubSuperseded: a later read covers this one; the content is below.
+	StubSuperseded StubReason = "superseded"
+	// StubEvicted: elided under token pressure; re-derivable via file_read.
+	StubEvicted StubReason = "evicted"
+)
 
 // Lower renders the full tool result, or — once stubbed — a pointer that keeps
 // the tool_call pairing valid while spending no meaningful tokens.
 func (f *File) Lower() llm.Message {
-	if !f.stubbed {
+	switch f.stubbed {
+	case StubSuperseded:
+		return llm.NewToolResultMessage(f.wire.ToolCallID,
+			fmt.Sprintf("File: %s lines %d-%d — superseded by a later read of the same content below; elided.",
+				f.Path, f.Start, f.End))
+	case StubEvicted:
+		return llm.NewToolResultMessage(f.wire.ToolCallID,
+			fmt.Sprintf("File: %s lines %d-%d — elided to fit the context budget; call file_read again if you still need it.",
+				f.Path, f.Start, f.End))
+	default:
 		return f.wire
 	}
-	return llm.NewToolResultMessage(f.wire.ToolCallID,
-		fmt.Sprintf("File: %s lines %d-%d — superseded by a later read of the same content below; elided.",
-			f.Path, f.Start, f.End))
 }
 
-// Stub elides the content (idempotent).
-func (f *File) Stub() { f.stubbed = true }
+// Stub elides the content with the given reason (idempotent; the first reason
+// wins — a superseded copy staying "superseded" under later eviction pressure
+// keeps its forward pointer meaningful).
+func (f *File) Stub(reason StubReason) {
+	if f.stubbed == "" {
+		f.stubbed = reason
+	}
+}
 
 // Stubbed reports whether the content has been elided.
-func (f *File) Stubbed() bool { return f.stubbed }
+func (f *File) Stubbed() bool { return f.stubbed != "" }
 
 // Covers reports whether f's range contains g's range of the same path — the
 // dedup precondition: everything g shows, f shows too.
@@ -107,7 +131,7 @@ func DedupFiles(messages []Msg) (stubbed int) {
 				continue
 			}
 			if newer.Covers(older) {
-				older.Stub()
+				older.Stub(StubSuperseded)
 				stubbed++
 			}
 		}
