@@ -1,0 +1,35 @@
+{
+  "description": "ccr 自身近期 feature PR 的 merge 双亲（§2.5 同工作负载重放）；docs-only PR 不入册",
+  "entries": [
+    {
+      "name": "#94 file-evict",
+      "from": "d64d19d87f617c1dcefcfe5e161304bb81d9e0d4",
+      "to": "a24ecf148f4b3b3a62556be67235b4459751b26a"
+    },
+    {
+      "name": "#93 file-msg",
+      "from": "bbc637eec1f58f61f5f663171c8172fbbe17bf70",
+      "to": "48646095ee544587cca0b19dec0e3e7b6fa52fa3"
+    },
+    {
+      "name": "#90 debrief-await",
+      "from": "243c4310b04c96b328183b5ece63a718257ef4c1",
+      "to": "3b6a0a216bb522263c433bb2c8868bfafcfa0247"
+    },
+    {
+      "name": "#88 finding-anchor",
+      "from": "7320a29b4b03037c5a8f7186430c97c93427910a",
+      "to": "70a085ac37031fc78fdb968d4534e8d1a041bd0f"
+    },
+    {
+      "name": "#87 unit-debrief",
+      "from": "1326e36af670fa5075425ca3efad5d511ee11a25",
+      "to": "769fc2c1fb6148789110ad2c2bd3fa29aed1ef27"
+    },
+    {
+      "name": "#84 typed-log",
+      "from": "47a600af26b3f77f6d6e410c082cec9ef281bfbd",
+      "to": "6dcb24397fbe6825629a26624c9ae36261d8b7c3"
+    }
+  ]
+}
