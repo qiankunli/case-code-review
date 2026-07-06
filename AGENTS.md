@@ -45,7 +45,7 @@ diff ─Splitter─▶ Fragment ─Merger─▶ Unit ─ClueFinder 找 Clue(spec
 >
 > **Clue / ClueFinder**：context 抽象的三件——找的动作（`ClueFinder.Find(u Unit) []Clue`，对评审作用域 Unit 找）、找的结果（`Clue{Kind, Text, Ref}`，Text 内联 / Ref 按需指针）、挂哪（`Unit.Clues`，merge 后收）。加一类 context = 加一个 finder，不动主链路。
 
-## 关键约定（核心五条）
+## 关键约定（核心六条）
 
 1. **评审语义 = 契约守恒，不是找语法 bug**：核对 diff 有没有破坏函数的 spec/case/rule 不变量；**语法 / 静态检查交给 lint 类工具**（Python `ruff`、Go `go build`/`go vet` 之类），不是 ccr 的活。
 2. **diff unit vs review unit 别混**：Splitter 从 diff 切出 diff unit；Merger 归并成 review unit（触发 loop 的那个，可能是单个、也可能是几个沿阶梯归并的更粗 unit）。成本超水位按文件归并——**降 loop 粒度、不降 context**。
@@ -53,6 +53,8 @@ diff ─Splitter─▶ Fragment ─Merger─▶ Unit ─ClueFinder 找 Clue(spec
 4. **上下文分廉价 / 昂贵两档，重活有闸**：廉价 finder（spec.json 查 spec/case/rule/link）总跑；昂贵 finder（caller/callee 的 call-graph grep）走**预算闸门**——diff unit 数超水位就跳（反正要归并、per-func 上下文也被稀释）。link 指向的 doc/函数**内容**仍按需 tool 取，不预塞。
 
 5. **通用操作不就地手写**：先查 stdlib（`slices`/`maps`/内置 `min`/`max`），stdlib 没有的查/进 [`go-stdx`](https://github.com/qiankunli/go-stdx)（自 `pkg/stdx` 孵化毕业，收录纪律见其 AGENTS.md）；第三方 common 库（samber/lo、bytedance/gopkg 等）已评估过暂不引——出现第三个"纯 transform 链"调用点再议。
+
+6. **review loop 结构上只读——是受守护的信任边界，不是巧合**：主评审 loop 的工具面是封闭只读集（`file_read`/`code_search`/`file_find`/`file_read_diff` 全走 git 只读动词，`code_comment` 仅写内存 collector，`task_done` 是控制信号），无 shell/exec、无 git 写动词、无文件写、`file_read` 有仓根沙箱防穿越。**给评审 loop 新增任何能写文件 / 改仓库状态 / 跑 shell 的工具，即破坏这条边界**——评审节点一旦能产生副作用，就从"看代码的"变成"改状态的"（业界事故：reviewer 执行 checkout 制造孤儿提交）。要加此类能力先问：它属于评审，还是属于评审之后的独立执行环节？后者不进这个工具集。
 
 > 另：Go 改动先 `go build ./...` / `go test ./...` 再提交。
 

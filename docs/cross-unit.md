@@ -36,6 +36,12 @@
 
 **速度**：并行 wall-clock 收益 ccr 已经拿到（unit 并发）；multi-agent ≈ 15× chat token 的教训要求 board 注入必须封顶、增量、定向。**Claude Code Agent Teams**（lead/共享任务表/mailbox/文件锁）的官方定位是交互式长会话，其文件系统机制是**跨进程税**——ccr 同进程 goroutine 不必交。
 
+**Superpowers v6 的信任边界经验（2026-07，外部背书）**：一个自主 reviewer 被上游影响时，审查是否还独立？其结论——**可靠的 AI 审查不是让审查者"更听话"，而是结构上不让它接触会污染判断的东西**——正是本设计分级/隔离机制的依据。三条直接对应：
+
+- 事故一（controller 把缺陷预描述成 Minor、reviewer 接受）= **cross_check 消费 bulletin 时的命门**：一条 `observation` 级通报若被当成事实，就是这个事故的复现（MAST"misusing peer input"）。答案就是 D3 的**三级消息 + lowering 统一盖章"未确认观察不得作为事实引用"**——不靠 reviewer 自觉，靠输入结构。
+- 其"末尾独立宽审查必须与 mid-run controller 隔离、是不同信息视野下的独立裁决" = cross_check **输入为 debrief/finding 结构化数据、不重放各 loop 对话**的设计依据（交接衰减 vs 独立视野）。
+- 其"reviewer 只读、模型必须显式声明"两条：ccr 主 loop 已结构只读（`AGENTS.md` 关键约定 6），但 **cross_check 派生新 loop 时必须显式声明模型、不继承**——把这条写进 v1 的任务派生契约（避免 superpowers 事故二"26 个 reviewer 继承最贵 tier"）。
+
 ## 定稿架构
 
 ### 总映射：team 要素 vs ccr 现状
@@ -53,6 +59,7 @@
 |---|---|---|---|
 | D1 | 进程模型 | 内存 Board（mutex 结构体）+ msg 类型；板事件落 session（`board_post`/`board_pull` 记录）只为 eval，不为通信 | 同进程 goroutine；文件/锁/mailbox 是跨进程税 |
 | D2 | 读写不对称 | **发布**：引擎自动提取事实（读了 X/报了 Y，零成本）+ `post_bulletin` tool 发判断（只有模型知道它怀疑什么）；**消费**：turn 边界注入定向增量，**不做 pull tool** | 递线索是 push 形状（模型无法查询它不知道存在的东西）；check_board 轮次 = 刚消灭的 fetch 成本；repeated_reads/wrap-up 证明可选行为不可靠（MAST"ignoring peer input"入口） |
+| D2b | cross_check 派生显式声明模型 | 派生任务的模型显式指定、不继承当前 loop | superpowers 事故二：省略模型静默继承最贵 tier；v1 任务派生契约的一条 |
 | D3 | 路由与分级 | symbols/paths 交集定向抄送；intent/observation/confirmed 三级，lowering 统一盖章"未确认观察不得作为事实引用" | 5.9% 重复率 vs N 倍广播 token；传染性误报防线 |
 | D4 | 动态任务 | teammate 可派生 `cross_check(units, 疑点)` 任务，空闲 worker 领走跑新 loop——**这是碰头会的正确形态**：不是每次都开的固定 phase，而是有事才碰头、发现者带上下文提出（交接衰减最小）。碰头会固定 phase 方案已否决，其 kill-mandate prompt 纪律遗产归 cross_check | 固定 phase = 无证据的常态成本；动态派生 = 按需 |
 | D5 | Lead | v1 不设 LLM Lead：任务分解已确定性且更优；汇总归 collector + review-filter；协调归任务队列。真 Lead 等 v1 数据 | Anthropic orchestrator 价值在开放式分解，review 不是；Lead 是 MAST 协调失败的最贵入口 |
@@ -141,4 +148,4 @@ type Board interface {
 - 既有共享面与机器：briefing（`docs/context-model.md` 关键设计 8）、msg model 与驱逐（`docs/message-model.md`）、unit 生命周期（`docs/unit-model.md` 关键设计 8）
 - 采集面：debrief / finding 记录（`eval/README.md` §8）
 - 独立 backlog（与 team 无依赖）：run 级 briefing 补给——从 debrief 挖"多个 unit 都在搜什么"升级为 run 级预载（repo_map 先例）
-- 业界扫描来源：[Anthropic multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system) · Cognition [Don't Build Multi-Agents](https://cognition.com/blog/dont-build-multi-agents) / [Multi-Agents: What's Actually Working](https://cognition.com/blog/multi-agents-working) · [MAST: Why Do Multi-Agent LLM Systems Fail (arXiv:2503.13657)](https://arxiv.org/abs/2503.13657) · [CodeAgent (arXiv:2402.02172)](https://arxiv.org/html/2402.02172v4) · [AutoReview (FSE'25)](https://dl.acm.org/doi/10.1145/3696630.3728618) · [More Rounds, More Noise (arXiv:2603.16244)](https://arxiv.org/pdf/2603.16244) · [Refute-or-Promote (arXiv:2604.19049)](https://arxiv.org/html/2604.19049) · [Claude Code Agent Teams docs](https://code.claude.com/docs/en/agent-teams) · [Greptile vs CodeRabbit](https://www.greptile.com/greptile-vs-coderabbit)
+- 业界扫描来源：[Anthropic multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system) · Cognition [Don't Build Multi-Agents](https://cognition.com/blog/dont-build-multi-agents) / [Multi-Agents: What's Actually Working](https://cognition.com/blog/multi-agents-working) · [MAST: Why Do Multi-Agent LLM Systems Fail (arXiv:2503.13657)](https://arxiv.org/abs/2503.13657) · [CodeAgent (arXiv:2402.02172)](https://arxiv.org/html/2402.02172v4) · [AutoReview (FSE'25)](https://dl.acm.org/doi/10.1145/3696630.3728618) · [More Rounds, More Noise (arXiv:2603.16244)](https://arxiv.org/pdf/2603.16244) · [Refute-or-Promote (arXiv:2604.19049)](https://arxiv.org/html/2604.19049) · [Claude Code Agent Teams docs](https://code.claude.com/docs/en/agent-teams) · [Greptile vs CodeRabbit](https://www.greptile.com/greptile-vs-coderabbit) · Superpowers v6.0.0（SDD reviewer 信任边界：输入隔离 / reviewer 只读 / 模型显式 / 独立末尾复审——本地 `superpowers/skills/subagent-driven-development/task-reviewer-prompt.md`）
