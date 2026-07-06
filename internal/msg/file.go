@@ -79,6 +79,11 @@ func (f *File) Stub(reason StubReason) {
 // Stubbed reports whether the content has been elided.
 func (f *File) Stubbed() bool { return f.stubbed != "" }
 
+// Reclaim / Reclaimed implement msg.Reclaimable: eviction under token pressure
+// is the evicted-reason stub. (Dedup uses Stub(StubSuperseded) directly.)
+func (f *File) Reclaim()        { f.Stub(StubEvicted) }
+func (f *File) Reclaimed() bool { return f.Stubbed() }
+
 // Covers reports whether f's range contains g's range of the same path — the
 // dedup precondition: everything g shows, f shows too.
 func (f *File) Covers(g *File) bool {

@@ -30,6 +30,7 @@ case-code-review/
     ├── agent/      ★ 评审编排：split→找 Clue（廉价 + 按预算闸门的昂贵 finder）→merge→每 review unit 一个 loop；按 Clue 渲染上下文；unit 的 Briefing（briefer 协议按 scope 定预载材料：own source / usage-sites / callchain 邻居函数体，共享预算引擎）；loop 收尾每 unit 落一条 **Debrief**（outcome/formed/降级/成本 → session，指标体系的常开采集面，见 `eval/README.md` §8）；file 级 review-filter；`--dry-run` 只装配上下文、不调 LLM
     ├── diff/       diff/hunk 解析、评论行号解析
     ├── msg/        review 领域消息模型：loop 货币 `[]msg.Msg`，wire 格式只在 lowering 边界出现——`docs/message-model.md`
+    ├── board/      Review Team v0 共享案情板（gate review_team 默认关）：Bulletin 定向路由 + 增量注入，unit loop 间互通进展——`docs/cross-unit.md`
     ├── llmloop/    agentic 评审 loop（自 ocr 引擎独立演化：会话货币 msg.Msg + 1:1 lowering、wrap-up 截断纪律、file dedup/evict、Outcome 均为 ccr 侧新增——`docs/message-model.md`）
     ├── config/     模板 prompt、rule.json、tools 配置
     └── model · gitcmd · session · telemetry · tool · scan · viewer …   支撑模块
@@ -54,7 +55,7 @@ diff ─Splitter─▶ Fragment ─Merger─▶ Unit ─ClueFinder 找 Clue(spec
 
 5. **通用操作不就地手写**：先查 stdlib（`slices`/`maps`/内置 `min`/`max`），stdlib 没有的查/进 [`go-stdx`](https://github.com/qiankunli/go-stdx)（自 `pkg/stdx` 孵化毕业，收录纪律见其 AGENTS.md）；第三方 common 库（samber/lo、bytedance/gopkg 等）已评估过暂不引——出现第三个"纯 transform 链"调用点再议。
 
-6. **review loop 结构上只读——是受守护的信任边界，不是巧合**：主评审 loop 的工具面是封闭只读集（`file_read`/`code_search`/`file_find`/`file_read_diff` 全走 git 只读动词，`code_comment` 仅写内存 collector，`task_done` 是控制信号），无 shell/exec、无 git 写动词、无文件写、`file_read` 有仓根沙箱防穿越。**给评审 loop 新增任何能写文件 / 改仓库状态 / 跑 shell 的工具，即破坏这条边界**——评审节点一旦能产生副作用，就从"看代码的"变成"改状态的"（业界事故：reviewer 执行 checkout 制造孤儿提交）。要加此类能力先问：它属于评审，还是属于评审之后的独立执行环节？后者不进这个工具集。
+6. **review loop 结构上只读——是受守护的信任边界**：主评审 loop 的工具面是封闭只读集（`file_read`/`code_search`/`file_find`/`file_read_diff` 全走 git 只读动词，`code_comment` 仅写内存 collector，`task_done` 是控制信号），无 shell/exec、无 git 写动词、无文件写、`file_read` 有仓根沙箱防穿越。**给评审 loop 新增任何能写文件 / 改仓库状态 / 跑 shell 的工具，即破坏这条边界**——评审节点一旦能产生副作用，就从"看代码的"变成"改状态的"（业界事故：reviewer 执行 checkout 制造孤儿提交）。要加此类能力先问：它属于评审，还是属于评审之后的独立执行环节？后者不进这个工具集。
 
 > 另：Go 改动先 `go build ./...` / `go test ./...` 再提交。
 

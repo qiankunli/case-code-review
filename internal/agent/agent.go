@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/qiankunli/case-code-review/internal/board"
 	"github.com/qiankunli/case-code-review/internal/callgraph"
 	"github.com/qiankunli/case-code-review/internal/config/rules"
 	"github.com/qiankunli/case-code-review/internal/config/template"
@@ -181,6 +182,9 @@ type Agent struct {
 	// typedGraph is the shared lazy handle to the typed Go call graph
 	// (nil when the typed_graph gate is off). See callgraph.TypedGraph.
 	typedGraph *callgraph.TypedGraph
+	// board is the Review Team's shared case board for this run (nil when the
+	// review_team gate is off). See docs/cross-unit.md.
+	board *board.Registry
 }
 
 // New creates a new Agent from the given arguments.
@@ -263,6 +267,11 @@ func New(args Args) *Agent {
 		costlyFinders: costlyFinders, // call-graph caller/callee clues (gated + budget-gated)
 		typedGraph:    typed,
 	}
+	// Review Team board (docs/cross-unit.md): one shared in-memory board per run
+	// when the gate is on; nil otherwise (loop behavior byte-identical).
+	if f.Enabled(feature.ReviewTeam) {
+		a.board = board.New()
+	}
 	// DiffLookup closure captures a so the runner can resolve per-file
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
 	// after New returns).
@@ -278,9 +287,20 @@ func New(args Args) *Agent {
 		RelocationEnabled: f.Enabled(feature.Relocation),
 		FileDedupEnabled:  f.Enabled(feature.FileDedup),
 		FileEvictEnabled:  f.Enabled(feature.FileEvict),
+		Board:             boardOrNil(a.board),
 		DiffLookup:        a.findDiff,
 	})
 	return a
+}
+
+// boardOrNil returns the board as the llmloop interface, or a true nil interface
+// when there is no board — Deps.Board must be a nil INTERFACE (not a typed nil
+// *Registry) so the loop's `Board != nil` guard works.
+func boardOrNil(b *board.Registry) board.Board {
+	if b == nil {
+		return nil
+	}
+	return b
 }
 
 // Run executes the full review pipeline: parse diffs -> plan per file -> LLM tool-loop -> collect comments.
@@ -561,7 +581,28 @@ func (a *Agent) dispatchUnits(ctx context.Context) ([]model.LlmComment, error) {
 	a.tagSymbolIDs(comments)
 	tagFingerprints(comments)
 	a.persistFindings(comments)
+	a.persistBoardPosts()
 	return comments, nil
+}
+
+// persistBoardPosts drains the run's board bulletins into the transcript
+// (board_post records) — the in-memory board's attribution/replay trail.
+func (a *Agent) persistBoardPosts() {
+	if a.board == nil {
+		return
+	}
+	posted := a.board.Posted()
+	if len(posted) == 0 {
+		return
+	}
+	out := make([]session.BoardPost, 0, len(posted))
+	for _, b := range posted {
+		out = append(out, session.BoardPost{
+			From: b.From, Turn: b.Turn, Level: int(b.Level),
+			Paths: b.Paths, Symbols: b.Symbols, Text: b.Text,
+		})
+	}
+	a.session.WriteBoardPosts(out)
 }
 
 // tagFingerprints stamps each comment's stable identity: sha256(path\0content),
@@ -707,7 +748,35 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 	for i := range units {
 		units[i].Dossier = a.findClues(units[i], costly)
 	}
+
+	// Review Team: register each unit's board interest before dispatch — its
+	// files + covered symbols + clue neighbors (the Relation axis reused as
+	// "what this unit watches"; docs/cross-unit.md 消费侧闸 1).
+	if a.board != nil {
+		for _, u := range units {
+			a.board.Register(u.ID, unitInterest(u))
+		}
+	}
 	return units, nil
+}
+
+// unitInterest builds a unit's board routing filter from its identity (paths +
+// covered symbols) and its clue neighbors (caller/callee/owner/used refs).
+func unitInterest(u unit.Unit) board.Interest {
+	in := board.Interest{Paths: map[string]bool{}, Symbols: map[string]bool{}}
+	for _, p := range u.Paths() {
+		in.Paths[p] = true
+	}
+	for _, s := range u.AllSymbols() {
+		in.Symbols[s] = true
+	}
+	for _, ref := range clueRefs(u.Dossier) {
+		in.Symbols[ref] = true
+		if path, _, ok := unit.SplitID(ref); ok {
+			in.Paths[path] = true
+		}
+	}
+	return in
 }
 
 // findClues assembles a Unit's Dossier: the cheap ClueFinders run always, the
@@ -977,6 +1046,9 @@ func (a *Agent) reviewUnit(ctx context.Context, u unit.Unit) error {
 	// other's comments against the wrong diff slice.
 	outcome, err := a.runner.RunPerFile(ctx, domain, sc)
 	deb.Outcome, deb.Reason = outcome.State, outcome.Reason
+	deb.BoardPulled = outcome.BoardPulled
+	deb.BoardInjectedTokens = outcome.BoardInjectedTokens
+	deb.BoardPosted = outcome.BoardPosted
 	// Close ends the unit's lifecycle: the debrief persists now, or — when
 	// async comment work is still in flight — the moment its last task ends.
 	a.session.CloseScope(sc, deb)
