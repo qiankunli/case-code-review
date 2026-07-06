@@ -5,13 +5,12 @@ import "testing"
 func TestEnabled_Defaults(t *testing.T) {
 	// Product features default ON (the full feature set is the product; gates
 	// exist to turn things OFF for ablation). The only exceptions are
-	// explicitly experimental gates awaiting validation — keep this list short
-	// and deliberate: a gate landing here must say in its registry desc WHY.
-	experimental := map[Gate]bool{} // empty today; a gate lands here with a WHY and leaves with data
+	// experimental gates default OFF — the two-tier semantics is read from the
+	// REGISTRY (Experimental field), not a test allowlist.
 	var s Set // nil = all defaults
 	for _, n := range Names() {
 		g := Gate(n)
-		if experimental[g] {
+		if Experimental(g) {
 			if s.Enabled(g) {
 				t.Errorf("experimental gate %q should default off", n)
 			}

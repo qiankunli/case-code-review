@@ -34,6 +34,17 @@ type Msg interface {
 	Lower() llm.Message
 }
 
+// Reclaimable is a message whose content can be RE-DERIVED — a file re-read, a
+// board re-pull — so under token pressure it may be shed (Reclaim) before the
+// loop pays for LLM summarization, which is neither free nor lossless. Eviction
+// is idempotent. File and Board implement it; the compression engine sheds
+// reclaimables oldest-first before summarizing (see evictReclaimable).
+type Reclaimable interface {
+	Msg
+	Reclaim() // elide content, keeping a one-line pointer
+	Reclaimed() bool
+}
+
 // Raw is the passthrough type: an llm.Message carried as-is (task prompts,
 // assistant turns, tool results, wrap-up nudges). It keeps the currency swap
 // byte-identical and remains the right type for anything that is genuinely
