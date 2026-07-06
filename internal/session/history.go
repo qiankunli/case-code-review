@@ -205,6 +205,30 @@ func (sh *SessionHistory) WriteFindings(findings []Finding) {
 	}
 }
 
+// BoardPost is one bulletin published to the Review Team board during the run,
+// persisted for attribution/replay (the board itself is in-memory).
+type BoardPost struct {
+	From    string
+	Turn    int
+	Level   int
+	Paths   []string
+	Symbols []string
+	Text    string
+}
+
+// WriteBoardPosts persists the run's board bulletins as "board_post" records.
+func (sh *SessionHistory) WriteBoardPosts(posts []BoardPost) {
+	sh.mu.Lock()
+	p := sh.persist
+	sh.mu.Unlock()
+	if p == nil {
+		return
+	}
+	for _, b := range posts {
+		p.WriteBoardPost(b.From, b.Turn, b.Level, b.Paths, b.Symbols, b.Text)
+	}
+}
+
 // New creates a new SessionHistory with the given repo directory.
 func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
 	sessionID := uuid.V4()

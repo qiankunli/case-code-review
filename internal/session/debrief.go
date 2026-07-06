@@ -46,6 +46,11 @@ type Debrief struct {
 	// UsageSites is how many pre-grepped use sites the briefing carried.
 	UsageSites int
 
+	// Review Team board activity (docs/cross-unit.md), 0 when the board is off.
+	BoardPulled         int // peer bulletins injected into this unit's loop
+	BoardInjectedTokens int // their rough token cost
+	BoardPosted         int // facts this unit published for peers
+
 	// Cost rollup — filled by WriteDebrief from the scope's task records.
 	Rounds     map[string]int // task type -> LLM rounds
 	ToolCalls  map[string]int // tool name -> calls

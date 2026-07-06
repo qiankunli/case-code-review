@@ -43,38 +43,48 @@ const (
 	// (robustness win via File dedup/evict covering preloads), cost flat, no
 	// quality regression evidence.
 	TypedBriefing Gate = "typed_briefing"
+	// ReviewTeam is the Review Team v0 (docs/cross-unit.md): concurrent unit
+	// loops share an in-memory case board — auto-published facts, directed
+	// incremental injection at turn boundaries. Default OFF (experimental)
+	// until the regression corpus shows cross-file recall or dedup benefit.
+	ReviewTeam Gate = "review_team"
 )
 
 // def is a gate's registry entry: default state + one-line description.
+// def is a gate's registry entry. Experimental marks a gate as default-off
+// pending validation (replay A/B / corpus evidence) — the two-tier semantics
+// lives HERE, in the registry, not in a test allowlist.
 type def struct {
-	Default bool
-	Desc    string
+	Default      bool
+	Desc         string
+	Experimental bool
 }
 
 // registry is the single source of truth for which gates exist and their defaults
 // (all on — the full feature set is the product default; gates exist to turn things
 // OFF for ablation).
 var registry = map[Gate]def{
-	Plan:         {true, "PLAN_TASK pre-pass per unit"},
-	CallChain:    {true, "call-chain merge axis (cross-file units via call graph)"},
-	CallerCallee: {true, "caller/callee context clues (call-graph grep)"},
-	SpecCase:     {true, "spec/case contract clues (authored; all relations)"},
-	Rule:         {true, "@rule clues (authored; all relations)"},
-	Link:         {true, "@link see-also clues (authored; all relations)"},
-	Doc:          {true, "docstring clues (derived from source; all relations)"},
-	History:      {true, "prior-review findings clues (reconciliation)"},
-	ReviewFilter: {true, "file-level pass dropping provably-wrong comments"},
-	Relocation:   {true, "LLM re-location of comments to the right line"},
-	Routing:      {true, "multi-model round-robin pool; off = single model (deterministic)"},
-	RepoMap:      {true, "ranked symbol map injected per run (anti guessed-name searches)"},
-	TypedGraph:   {true, "type-checker-resolved call edges for caller/callee/merge (Go)"},
+	Plan:         {true, "PLAN_TASK pre-pass per unit", false},
+	CallChain:    {true, "call-chain merge axis (cross-file units via call graph)", false},
+	CallerCallee: {true, "caller/callee context clues (call-graph grep)", false},
+	SpecCase:     {true, "spec/case contract clues (authored; all relations)", false},
+	Rule:         {true, "@rule clues (authored; all relations)", false},
+	Link:         {true, "@link see-also clues (authored; all relations)", false},
+	Doc:          {true, "docstring clues (derived from source; all relations)", false},
+	History:      {true, "prior-review findings clues (reconciliation)", false},
+	ReviewFilter: {true, "file-level pass dropping provably-wrong comments", false},
+	Relocation:   {true, "LLM re-location of comments to the right line", false},
+	Routing:      {true, "multi-model round-robin pool; off = single model (deterministic)", false},
+	RepoMap:      {true, "ranked symbol map injected per run (anti guessed-name searches)", false},
+	TypedGraph:   {true, "type-checker-resolved call edges for caller/callee/merge (Go)", false},
 
-	UsageSites:     {true, "pre-grepped use sites of the changed symbols in the briefing"},
-	RangedPreload:  {true, "over-budget file fallback: inline the unit's function bodies"},
-	NeighborSource: {true, "callchain briefing: inline caller/callee neighbor bodies"},
-	FileDedup:      {true, "stub earlier file_read results superseded by a later covering read"},
-	FileEvict:      {true, "under token pressure, shed re-derivable file content before LLM compression"},
-	TypedBriefing:  {true, "briefing preloads as per-file messages (File dedup/evict cover preloads)"},
+	UsageSites:     {true, "pre-grepped use sites of the changed symbols in the briefing", false},
+	RangedPreload:  {true, "over-budget file fallback: inline the unit's function bodies", false},
+	NeighborSource: {true, "callchain briefing: inline caller/callee neighbor bodies", false},
+	FileDedup:      {true, "stub earlier file_read results superseded by a later covering read", false},
+	FileEvict:      {true, "under token pressure, shed re-derivable file content before LLM compression", false},
+	TypedBriefing:  {true, "briefing preloads as per-file messages (File dedup/evict cover preloads)", false},
+	ReviewTeam:     {false, "Review Team v0: units share an in-memory case board (auto facts + directed injection)", true},
 }
 
 // Set is a resolved gate configuration. nil is valid and means "all defaults".
@@ -149,10 +159,17 @@ func Describe() []string {
 		if !d.Default {
 			state = "off"
 		}
-		out = append(out, fmt.Sprintf("%-*s (default %s)  %s", maxW, n, state, d.Desc))
+		tag := ""
+		if d.Experimental {
+			tag = " [experimental]"
+		}
+		out = append(out, fmt.Sprintf("%-*s (default %s)%s  %s", maxW, n, state, tag, d.Desc))
 	}
 	return out
 }
+
+// Experimental reports whether a gate is validation-pending (default-off tier).
+func Experimental(g Gate) bool { return registry[g].Experimental }
 
 // Parse reads a "k=v,k=v" spec (CLI --features / CCR_FEATURES env). Values accept
 // on/off/true/false/1/0/yes/no (case-insensitive). Unknown gate names are NOT

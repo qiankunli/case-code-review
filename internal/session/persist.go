@@ -347,10 +347,40 @@ func (jw *jsonlWriter) WriteDebrief(ss *ScopeSession, d Debrief) string {
 	if len(d.ToolCalls) > 0 {
 		rec["tool_calls"] = d.ToolCalls
 	}
+	if d.BoardPulled != 0 || d.BoardPosted != 0 {
+		rec["board"] = map[string]int{
+			"pulled":          d.BoardPulled,
+			"injected_tokens": d.BoardInjectedTokens,
+			"posted":          d.BoardPosted,
+		}
+	}
 	addScopeFields(rec, ss)
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid
+}
+
+// WriteBoardPost writes one "board_post" record — a bulletin published during
+// the run, for attribution and replay (the board is otherwise in-memory).
+func (jw *jsonlWriter) WriteBoardPost(from string, turn, level int, paths, symbols []string, text string) {
+	u := uuid.V4()
+	jw.mu.Lock()
+	defer jw.mu.Unlock()
+	rec := map[string]any{
+		"uuid":       u,
+		"parentUuid": jw.lastUUID,
+		"type":       "board_post",
+		"sessionId":  jw.sessionID,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		"from":       from,
+		"turn":       turn,
+		"level":      level,
+		"paths":      paths,
+		"symbols":    symbols,
+		"text":       text,
+	}
+	jw.writeRecordLocked(rec)
+	jw.lastUUID = u
 }
 
 // WriteFinding writes one delivered finding as a "finding" record (see Finding).
