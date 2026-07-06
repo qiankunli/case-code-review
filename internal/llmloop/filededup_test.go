@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qiankunli/case-code-review/internal/board"
 	"github.com/qiankunli/case-code-review/internal/config/template"
 	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/msg"
@@ -121,7 +122,7 @@ func TestEvictFiles(t *testing.T) {
 	sacrifice.Stub(msg.StubEvicted)
 	stubTokens := countMsgTokens([]msg.Msg{sacrifice})
 	limit := countMsgTokens([]msg.Msg{msgs[0], newest}) + 2*stubTokens + 5
-	if n := evictFiles(msgs, limit); n != 2 {
+	if n := evictReclaimable(msgs, limit); n != 2 {
 		t.Fatalf("evicted = %d, want 2", n)
 	}
 	if !oldest.Stubbed() || !middle.Stubbed() || newest.Stubbed() {
@@ -132,7 +133,7 @@ func TestEvictFiles(t *testing.T) {
 	}
 
 	// Under-limit conversations are untouched.
-	if n := evictFiles(msgs, 1<<20); n != 0 {
+	if n := evictReclaimable(msgs, 1<<20); n != 0 {
 		t.Fatal("must not evict under the limit")
 	}
 }
@@ -170,3 +171,84 @@ func TestAsyncCompressionSnapshotRace(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// Board eviction: a Board digest is reclaimable, shed before LLM compression.
+func TestEvictReclaimable_IncludesBoard(t *testing.T) {
+	bd := msg.NewBoard("peer notes: " + strings.Repeat("x", 400))
+	msgs := []msg.Msg{msg.Text("user", "task"), bd}
+	full := countMsgTokens(msgs)
+	if n := evictReclaimable(msgs, full-1); n != 1 {
+		t.Fatalf("board digest must be evictable, got %d", n)
+	}
+	if !bd.Reclaimed() {
+		t.Fatal("board not reclaimed")
+	}
+	lw := bd.Lower()
+	if !strings.Contains(lw.ExtractText(), "elided") {
+		t.Fatalf("reclaimed board must render a pointer: %q", lw.ExtractText())
+	}
+}
+
+type stubBoard struct {
+	digest string
+	pulls  int
+	posts  []board.Bulletin
+}
+
+func (s *stubBoard) Register(string, board.Interest) {}
+func (s *stubBoard) Publish(b board.Bulletin)        { s.posts = append(s.posts, b) }
+func (s *stubBoard) Pull(string) (string, int) {
+	s.pulls++
+	if s.pulls == 1 && s.digest != "" {
+		return s.digest, 1
+	}
+	return "", 0
+}
+
+func TestRunPerFile_BoardPullInjectsAndAutoPublishes(t *testing.T) {
+	result := fmt.Sprintf("File: pkg/a.go (Total lines: 1)\nIS_TRUNCATED: false\nLINE_RANGE: 1-1\n%s", "1|x\n")
+	client := &scriptedClient{responses: []*llm.ChatResponse{
+		toolCallResp("file_read", `{"file_path":"pkg/a.go"}`),
+		toolCallResp("task_done", `{}`),
+	}}
+	reg := tool.NewRegistry()
+	reg.Register(fileReadStub{body: result})
+	reg.Freeze()
+	sb := &stubBoard{digest: "peer confirmed: read shared.go"}
+	r := NewRunner(Deps{
+		LLMClient:        client,
+		Template:         template.Template{MaxToolRequestTimes: 10, MaxTokens: 10000},
+		Tools:            reg,
+		CommentCollector: tool.NewCommentCollector(),
+		Session:          session.New(".", "test", "m", session.SessionOptions{}),
+		Board:            sb,
+	})
+	outcome, err := r.RunPerFile(context.Background(), msg.Wrap([]llm.Message{llm.NewTextMessage("user", "review")}), scope())
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	// Turn 1 pulled the peer digest — it must appear in that request.
+	if !strings.Contains(requestText(client.requests[0]), "peer confirmed: read shared.go") {
+		t.Fatalf("board digest not injected into turn 1")
+	}
+	if outcome.BoardPulled != 1 {
+		t.Fatalf("BoardPulled = %d, want 1", outcome.BoardPulled)
+	}
+	// The file_read was auto-published as a fact keyed by path.
+	if outcome.BoardPosted != 1 || len(sb.posts) != 1 || sb.posts[0].Paths[0] != "pkg/a.go" {
+		t.Fatalf("auto-publish off: posted=%d posts=%+v", outcome.BoardPosted, sb.posts)
+	}
+	if sb.posts[0].Level != board.LevelConfirmed {
+		t.Fatalf("read fact must be confirmed-level: %v", sb.posts[0].Level)
+	}
+}
+
+func requestText(req llm.ChatRequest) string {
+	var b strings.Builder
+	for _, m := range req.Messages {
+		if s, ok := m.Content.(string); ok {
+			b.WriteString(s)
+		}
+	}
+	return b.String()
+}

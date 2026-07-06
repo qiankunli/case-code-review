@@ -1,4 +1,4 @@
-# Review Team：跨 unit 协作（设计定稿，v0 待实现）
+# Review Team：跨 unit 协作（v0 已实现，gate 默认关）
 
 > 隐喻链全景：Clue（线索）→ Dossier（卷宗）→ Briefing（交底）→ **Bulletin（通报）** → Debrief（复盘），全部围着 **Board（案情板）**。
 >
@@ -124,17 +124,21 @@ while condition:
 接缝（引擎不再为实验改动，迭代全在 Board 实现包）：
 
 ```go
-// llmloop.Deps 增加可选依赖；nil = 今天的行为，prompt 逐字节不变
-Board Board
+// llmloop.Deps 增加可选依赖；nil = 今天的行为，prompt 逐字节不变（实现形态）
+Board board.Board
 type Board interface {
-    Pull(sc session.Scope) []msg.Msg     // turn 顶部：定向增量（BoardMsg，domain 消息）
-    Publish(sc session.Scope, b Bulletin) // tool 执行后：自动层事实提取；post_bulletin tool 走同一入口
+    Register(scopeID string, in Interest)      // dispatch 前登记 unit interest
+    Publish(b Bulletin)                        // tool 后自动层提取事实（v1: post_bulletin 走同一入口）
+    Pull(scopeID string) (digest string, n int) // turn 顶部：路由+打分+封顶后的渲染增量
 }
 ```
+> 板负责渲染（打分/封顶/隔离盖章都在 Registry），llmloop 只把非空 digest 包成 `msg.Board` 注入——渲染集中、引擎薄。
 
 ## 切片、验收与已知弱点
 
-**v0（纯机制）**：Board 内存结构 + `Bulletin`/`BoardMsg` msg 类型 + 自动发布层 + turn 边界定向注入（闸 1+闸 2 前四道）+ debrief 计数（`board_pulled/published/evicted`）+ 板事件落 session。gate `review_team` 默认关（experimental）。**不含**：post_bulletin tool、cross_check、Lead、板面压缩。
+**v0（纯机制，已实现）**：`internal/board`（Registry：交集打分 symbol>path、level 乘数、增量游标、top-K+字节封顶、隔离盖章渲染）+ `msg.Board`（进 `Reclaimable` 驱逐序，与 File 同档）+ llmloop 接缝（`Deps.Board` nil=字节不变；turn 顶 Pull 注入、tool 后自动 Publish 事实）+ agent 注册 unit interest（paths+symbols+clue_refs）+ debrief `board{pulled,injected_tokens,posted}` + `board_post` 落 session。gate `review_team` 默认关（experimental，语义入 registry `Experimental` 字段）。**不含**：post_bulletin tool、cross_check、Lead、板面压缩。
+
+**v0 冒烟（2026-07-05，ed0ca39 6 文件 5 unit）**：19 条 confirmed 级 file-read 事实自动发布；路由生效——`agent.go` 被 3 个 unit 读，其 debrief 各记 pulls 3/5/10；注入 token 86-473/unit（封顶有效）。跨 unit 同文件重复读（loop 内 dedup 够不着的那类）现在互相可见——是否降低重复读，正是 v0 待答的问题。
 
 **v1（判断级协作，v0 数据达标后）**：`post_bulletin` + `post_task(cross_check)` 动态任务队列 + 板面 supersede 压缩 + 累计预算。
 

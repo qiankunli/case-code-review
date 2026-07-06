@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/qiankunli/case-code-review/internal/board"
 	"github.com/qiankunli/case-code-review/internal/config/template"
 	"github.com/qiankunli/case-code-review/internal/diff"
 	"github.com/qiankunli/case-code-review/internal/llm"
@@ -46,6 +47,10 @@ const wrapUpPrompt = "BUDGET NEARLY EXHAUSTED — stop investigating now. Based 
 type Outcome struct {
 	State  string // OutcomeCompleted | OutcomeTruncated | OutcomeTimeout | OutcomeLLMError
 	Reason string // truncation reason or error text; "" when completed
+	// Review Team board activity for this unit's loop (0 when the board is off).
+	BoardPulled         int // peer bulletins injected into this loop
+	BoardInjectedTokens int // their rough token cost
+	BoardPosted         int // facts this loop published for peers
 }
 
 const (
@@ -79,6 +84,10 @@ type Deps struct {
 	// pass, shed the re-derivable slice of the context — file content the
 	// model can always read again.
 	FileEvictEnabled bool
+	// Board is the Review Team's shared case board (docs/cross-unit.md); nil =
+	// no team (today's behavior, prompt byte-identical). When set, each turn
+	// pulls peers' relevant bulletins and auto-publishes this loop's facts.
+	Board board.Board
 	// DiffLookup is consulted by the code_comment tool path to resolve
 	// line numbers against the file's diff (or against full file content
 	// in scan mode — scan adapters return a synthetic Diff whose
@@ -243,13 +252,21 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []msg.Msg, sc session.
 	wrapUpIssued := false
 	completed := false
 	truncateReason := ""
+	turn := 0
+	var boardPulled, boardTokens, boardPosted int
+	// finish stamps the loop's board activity onto every Outcome return.
+	finish := func(o Outcome) Outcome {
+		o.BoardPulled, o.BoardInjectedTokens, o.BoardPosted = boardPulled, boardTokens, boardPosted
+		return o
+	}
 
 	for toolReqCount > 0 {
+		turn++
 		select {
 		case <-ctx.Done():
 			r.RecordWarning("unit_incomplete", newPath,
 				"review ended without task_done (deadline exceeded); verdict is partial — do not read as clean")
-			return Outcome{State: OutcomeTimeout, Reason: "deadline exceeded"}, ctx.Err()
+			return finish(Outcome{State: OutcomeTimeout, Reason: "deadline exceeded"}), ctx.Err()
 		default:
 		}
 
@@ -272,6 +289,18 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []msg.Msg, sc session.
 
 		toolReqCount--
 
+		// Review Team: pull peers' relevant bulletins at the turn boundary
+		// (docs/cross-unit.md). Injection is directed + incremental + capped by
+		// the board, so an empty digest costs nothing; a non-empty one enters as
+		// an evictable Board message.
+		if r.deps.Board != nil {
+			if digest, n := r.deps.Board.Pull(sc.ID); n > 0 {
+				messages = append(messages, msg.NewBoard(digest))
+				boardPulled += n
+				boardTokens += llm.CountTokens(digest)
+			}
+		}
+
 		// Lower once per round: the session record and the API call see the same
 		// wire form the model does.
 		wire := msg.Lower(messages)
@@ -292,9 +321,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []msg.Msg, sc session.
 			// A deadline hit mid-call surfaces as an LLM error; report it as the
 			// timeout it is so debriefs don't misclassify slow units as API failures.
 			if ctx.Err() != nil {
-				return Outcome{State: OutcomeTimeout, Reason: "deadline exceeded"}, fmt.Errorf("LLM completion error: %w", err)
+				return finish(Outcome{State: OutcomeTimeout, Reason: "deadline exceeded"}), fmt.Errorf("LLM completion error: %w", err)
 			}
-			return Outcome{State: OutcomeLLMError, Reason: err.Error()}, fmt.Errorf("LLM completion error: %w", err)
+			return finish(Outcome{State: OutcomeLLMError, Reason: err.Error()}), fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
 		r.recordModel(resp.Alias) // run-level model identity; counts every response, not just ones with findings
@@ -349,6 +378,17 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []msg.Msg, sc session.
 			}
 		}
 
+		// Review Team: auto-publish this turn's facts for peers (docs/cross-unit.md
+		// D2 — the engine extracts facts from tool calls for free; the model
+		// never spends a round on it). v0 publishes read + flag facts, keyed by
+		// path so peers watching the same file receive them.
+		if r.deps.Board != nil {
+			for _, b := range extractFacts(sc.ID, turn, calls) {
+				r.deps.Board.Publish(b)
+				boardPosted++
+			}
+		}
+
 		if taskCompleted {
 			completed = true
 			break
@@ -380,9 +420,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []msg.Msg, sc session.
 		}
 		r.RecordWarning("unit_incomplete", newPath,
 			"review ended without task_done ("+truncateReason+"); verdict is partial — do not read as clean")
-		return Outcome{State: OutcomeTruncated, Reason: truncateReason}, nil
+		return finish(Outcome{State: OutcomeTruncated, Reason: truncateReason}), nil
 	}
-	return Outcome{State: OutcomeCompleted}, nil
+	return finish(Outcome{State: OutcomeCompleted}), nil
 }
 
 // executeToolCall dispatches a single tool call from the LLM response and
@@ -540,7 +580,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	// Over the warning threshold: shed re-derivable file content first (free,
 	// deterministic), and only summarize if that wasn't enough.
 	if tokenCount > warnLimit && r.deps.FileEvictEnabled {
-		if n := evictFiles(*messages, warnLimit); n > 0 {
+		if n := evictReclaimable(*messages, warnLimit); n > 0 {
 			telemetry.Event(ctx, "context.file_evict",
 				telemetry.AnyToAttr("file.path", sc.Path()),
 				telemetry.AnyToAttr("evicted", n))
@@ -582,7 +622,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 
 	finalCount := countMsgTokens(*messages)
 	if finalCount > warnLimit && r.deps.FileEvictEnabled {
-		evictFiles(*messages, warnLimit)
+		evictReclaimable(*messages, warnLimit)
 		finalCount = countMsgTokens(*messages)
 	}
 	if finalCount > warnLimit {
@@ -591,6 +631,42 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	}
 
 	return countMsgTokens(*messages) < warnLimit
+}
+
+// extractFacts turns a turn's tool calls into board bulletins — the auto
+// publish layer (docs/cross-unit.md D2): the engine harvests facts the model
+// produced anyway, so publishing costs no round. v0 harvests two, both keyed by
+// the file path so peers watching that file receive them:
+//   - file_read → "read <path>" (the cross-unit dedup signal)
+//   - code_comment → "flagged an issue in <path>" (cross-unit awareness)
+//
+// All confirmed-level (they are things that happened, not suspicions).
+func extractFacts(scopeID string, turn int, calls []llm.ToolCall) []board.Bulletin {
+	var out []board.Bulletin
+	for _, c := range calls {
+		var args struct {
+			FilePath  string `json:"file_path"`
+			StartLine int    `json:"start_line"`
+			EndLine   int    `json:"end_line"`
+		}
+		_ = json.Unmarshal([]byte(c.Function.Arguments), &args)
+		if args.FilePath == "" {
+			continue
+		}
+		switch c.Function.Name {
+		case "file_read":
+			text := "read " + args.FilePath
+			if args.StartLine > 0 {
+				text = fmt.Sprintf("read %s:%d-%d", args.FilePath, args.StartLine, args.EndLine)
+			}
+			out = append(out, board.Bulletin{From: scopeID, Turn: turn, Level: board.LevelConfirmed,
+				Paths: []string{args.FilePath}, Text: text})
+		case "code_comment":
+			out = append(out, board.Bulletin{From: scopeID, Turn: turn, Level: board.LevelConfirmed,
+				Paths: []string{args.FilePath}, Text: "flagged an issue in " + args.FilePath})
+		}
+	}
+	return out
 }
 
 // lookupTool returns the provider for a given tool from the registry, or

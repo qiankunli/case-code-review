@@ -64,27 +64,28 @@ func countMsgTokens(msgs []msg.Msg) int {
 	return total
 }
 
-// evictFiles stubs un-stubbed File messages OLDEST-FIRST until the
-// conversation fits under limit tokens (or candidates run out), returning how
-// many were evicted. It runs before LLM compression because file content is
-// the RE-DERIVABLE slice of the context — the model can always file_read it
-// again — so shedding it is deterministic, free, and lossless in a way a
-// summarization pass is not. Oldest-first means the most recent read is shed
-// last (it's the one the model is most likely still working from).
-func evictFiles(messages []msg.Msg, limit int) int {
+// evictReclaimable sheds re-derivable messages (msg.Reclaimable: file reads,
+// board digests) OLDEST-FIRST until the conversation fits under limit tokens
+// (or candidates run out), returning how many were evicted. It runs before LLM
+// compression because this content is the RE-DERIVABLE slice of the context —
+// the model can always file_read or re-pull it — so shedding it is
+// deterministic, free, and lossless in a way a summarization pass is not.
+// Oldest-first means the most recent read is shed last (it's the one the model
+// is most likely still working from).
+func evictReclaimable(messages []msg.Msg, limit int) int {
 	total := countMsgTokens(messages)
 	if total <= limit {
 		return 0
 	}
 	evicted := 0
 	for _, m := range messages {
-		f, ok := m.(*msg.File)
-		if !ok || f.Stubbed() {
+		rc, ok := m.(msg.Reclaimable)
+		if !ok || rc.Reclaimed() {
 			continue
 		}
-		before := f.Lower()
-		f.Stub(msg.StubEvicted)
-		after := f.Lower()
+		before := rc.Lower()
+		rc.Reclaim()
+		after := rc.Lower()
 		total -= llm.CountTokens(before.ExtractText()) - llm.CountTokens(after.ExtractText())
 		evicted++
 		if total <= limit {
