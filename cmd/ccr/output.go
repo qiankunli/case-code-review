@@ -176,13 +176,13 @@ func buildDiffLines(comment model.LlmComment) []suggestdiff.DiffLine {
 }
 
 type jsonSummary struct {
-	FilesReviewed    int64  `json:"files_reviewed"`
-	Comments         int64  `json:"comments"`
-	TotalTokens      int64  `json:"total_tokens"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int64  `json:"cache_write_tokens,omitempty"`
+	FilesReviewed    int64 `json:"files_reviewed"`
+	Comments         int64 `json:"comments"`
+	TotalTokens      int64 `json:"total_tokens"`
+	InputTokens      int64 `json:"input_tokens"`
+	OutputTokens     int64 `json:"output_tokens"`
+	CacheReadTokens  int64 `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
 	// ElapsedSec is the review's wall-clock cost in whole seconds — numeric so
 	// consumers (e.g. an MR-comment header) never parse a Go duration string.
 	ElapsedSec int64 `json:"elapsed_sec"`
@@ -270,6 +270,29 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		} else {
 			out.Status = "completed_with_warnings"
 		}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+// outputJSONFatal emits the failed-run JSON shape. In --format json the stdout
+// contract is "always exactly one JSON object": a fatal run error must not
+// leave stdout empty, or downstream parsers report their own parse failure
+// instead of the actual error. Warnings ride along — on an all-units-failed
+// run they carry the per-unit error reasons.
+func outputJSONFatal(runErr error, warnings []agent.AgentWarning) error {
+	out := jsonOutput{
+		Status:   "failed",
+		Version:  Version,
+		Message:  runErr.Error(),
+		Comments: []model.LlmComment{},
+		ToolCalls: &jsonToolCalls{
+			ByTool: map[string]int64{},
+		},
+	}
+	if len(warnings) > 0 {
+		out.Warnings = warnings
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
