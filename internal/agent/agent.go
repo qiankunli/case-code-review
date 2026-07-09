@@ -447,20 +447,35 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 }
 
 // injectDiffMap builds a read-only DiffMap from parsed diffs and sets it
-// on the FileReadDiffProvider. Must be called after loadDiffs and before
-// any concurrent access to the registry.
+// on the FileReadDiffProvider, plus the rename/delete path map on the
+// FileReadProvider (so a read of a path this diff moved or removed gets
+// redirected/explained instead of a raw git miss). Must be called after
+// loadDiffs and before any concurrent access to the registry.
 func (a *Agent) injectDiffMap() {
 	m := make(map[string]string, len(a.diffs))
+	renamedTo := make(map[string]string)
+	deleted := make(map[string]bool)
 	for i := range a.diffs {
 		d := &a.diffs[i]
 		if d.NewPath != "/dev/null" {
 			m[d.NewPath] = d.Diff
+		}
+		if d.IsRenamed && d.OldPath != "" && d.NewPath != "" && d.OldPath != d.NewPath {
+			renamedTo[d.OldPath] = d.NewPath
+		}
+		if d.IsDeleted && d.OldPath != "" && d.OldPath != "/dev/null" {
+			deleted[d.OldPath] = true
 		}
 	}
 	dm := tool.NewDiffMap(m)
 	if p, ok := a.args.Tools.Get(tool.FileReadDiff.Name()); ok {
 		if frd, ok := p.(*tool.FileReadDiffProvider); ok {
 			frd.SetDiffMap(dm)
+		}
+	}
+	if p, ok := a.args.Tools.Get(tool.FileRead.Name()); ok {
+		if frp, ok := p.(*tool.FileReadProvider); ok {
+			frp.SetDiffPaths(tool.NewDiffPaths(renamedTo, deleted))
 		}
 	}
 }
