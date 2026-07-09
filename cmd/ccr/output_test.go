@@ -1,6 +1,14 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"os"
+	"testing"
+
+	"github.com/qiankunli/case-code-review/internal/agent"
+)
 
 func TestSanitizeTerminal(t *testing.T) {
 	tests := []struct {
@@ -31,5 +39,44 @@ func TestSanitizeTerminal(t *testing.T) {
 				t.Errorf("sanitizeTerminal(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestOutputJSONFatal_EmitsParseableFailedJSON(t *testing.T) {
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	emitErr := outputJSONFatal(
+		errors.New("all 3 unit review(s) failed"),
+		[]agent.AgentWarning{{Type: "unit_error", File: "a.go", Message: "context deadline exceeded"}},
+	)
+	w.Close()
+	os.Stdout = old
+	if emitErr != nil {
+		t.Fatal(emitErr)
+	}
+
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out jsonOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, raw)
+	}
+	if out.Status != "failed" {
+		t.Errorf("status = %q, want failed", out.Status)
+	}
+	if out.Message != "all 3 unit review(s) failed" {
+		t.Errorf("message = %q", out.Message)
+	}
+	if len(out.Warnings) != 1 || out.Warnings[0].Type != "unit_error" {
+		t.Errorf("warnings not carried through: %+v", out.Warnings)
+	}
+	if out.Comments == nil {
+		t.Error("comments must be [] not null")
 	}
 }
