@@ -362,3 +362,50 @@ func TestExecute_WithEndLine(t *testing.T) {
 		t.Error("line 5 should not appear")
 	}
 }
+
+func TestExecute_RenamedPath_RedirectsToNewPath(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "new.txt", "hello\nworld\n")
+
+	p := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	p.SetDiffPaths(NewDiffPaths(map[string]string{"old.txt": "new.txt"}, nil))
+
+	out, err := p.Execute(context.Background(), map[string]any{"file_path": "old.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `renamed to "new.txt"`) {
+		t.Errorf("expected rename note, got:\n%s", out)
+	}
+	if !strings.Contains(out, "File: new.txt") {
+		t.Errorf("expected redirected header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1|hello") {
+		t.Errorf("expected redirected content, got:\n%s", out)
+	}
+}
+
+func TestExecute_DeletedPath_ExplainsDeletion(t *testing.T) {
+	dir := t.TempDir()
+
+	p := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	p.SetDiffPaths(NewDiffPaths(nil, map[string]bool{"gone.txt": true}))
+
+	out, err := p.Execute(context.Background(), map[string]any{"file_path": "gone.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "was deleted in this diff") {
+		t.Errorf("expected deletion explanation, got:\n%s", out)
+	}
+}
+
+func TestExecute_MissWithoutDiffPaths_StillErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	p := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	if _, err := p.Execute(context.Background(), map[string]any{"file_path": "nope.txt"}); err == nil {
+		t.Fatal("expected not-found error for a path absent from the diff maps")
+	}
+}
