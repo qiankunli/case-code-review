@@ -3,8 +3,10 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/qiankunli/case-code-review/internal/board"
 	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/session"
 	"github.com/qiankunli/case-code-review/internal/tool"
@@ -107,23 +109,92 @@ func TestExecuteToolCall_CodeCommentKeepsScopeMemberPath(t *testing.T) {
 }
 
 func TestExtractFacts_ToolSpecificPathArgs(t *testing.T) {
+	sc := session.Scope{ID: "u1", Kind: "unit", Type: "file", Paths: []string{"main.go", "b.go"}}
 	calls := []llm.ToolCall{
 		{Function: llm.FunctionCall{Name: "file_read",
 			Arguments: `{"file_path":"a.go","start_line":3,"end_line":9}`}},
-		// code_comment names its path argument "path", not "file_path" — the
-		// flag fact must still be harvested (regression: it was silently dropped).
+		// The common shape: code_comment's raw arguments carry NO path (the
+		// anchor path is injected post-parse by executeToolCall) — the flag
+		// fact must anchor to the scope's representative path, not vanish
+		// (regression: zero flag facts ever reached the board).
 		{Function: llm.FunctionCall{Name: "code_comment",
-			Arguments: `{"path":"b.go","content":"issue"}`}},
-		{Function: llm.FunctionCall{Name: "code_comment", Arguments: `{"content":"no path"}`}},
+			Arguments: `{"comments":[{"content":"issue","existing_code":"x"}]}`}},
+		// A raw path that IS a scope member is kept (multi-file units comment
+		// beyond the representative path).
+		{Function: llm.FunctionCall{Name: "code_comment",
+			Arguments: `{"path":"b.go","comments":[]}`}},
+		// A hallucinated non-member path snaps to the representative path,
+		// mirroring executeToolCall's rule.
+		{Function: llm.FunctionCall{Name: "code_comment",
+			Arguments: `{"path":"elsewhere.go","comments":[]}`}},
 	}
-	facts := extractFacts("scope", 2, calls)
-	if len(facts) != 2 {
-		t.Fatalf("want 2 facts (read + flag), got %d: %+v", len(facts), facts)
+	facts := extractFacts(sc, 2, calls)
+	if len(facts) != 4 {
+		t.Fatalf("want 4 facts, got %d: %+v", len(facts), facts)
 	}
 	if facts[0].Text != "read a.go:3-9" || facts[0].Paths[0] != "a.go" {
 		t.Fatalf("unexpected read fact: %+v", facts[0])
 	}
-	if facts[1].Text != "flagged an issue in b.go" || facts[1].Paths[0] != "b.go" {
-		t.Fatalf("unexpected flag fact: %+v", facts[1])
+	for i, want := range map[int]string{1: "main.go", 2: "b.go", 3: "main.go"} {
+		if facts[i].Paths[0] != want || facts[i].Text != "flagged an issue in "+want {
+			t.Fatalf("flag fact %d: want path %s, got %+v", i, want, facts[i])
+		}
+	}
+}
+
+func TestHandlePostBulletin(t *testing.T) {
+	b := board.New()
+	r := NewRunner(Deps{Board: b, PostBulletinEnabled: true})
+	budget := 2
+
+	call := func(argsJSON string) (string, bool) {
+		return r.handlePostBulletin("u1", 4, llm.ToolCall{
+			Function: llm.FunctionCall{Name: "post_bulletin", Arguments: argsJSON},
+		}, &budget)
+	}
+
+	if res, posted := call(`{"text":"","paths":["a.go"]}`); posted || !strings.Contains(res, "non-empty text") {
+		t.Fatalf("empty text must be rejected: %q", res)
+	}
+	if res, posted := call(`{"text":"suspicion"}`); posted || !strings.Contains(res, "routing key") {
+		t.Fatalf("missing routing keys must be rejected: %q", res)
+	}
+	if _, posted := call(`{"text":"port 8080 here — does the probe config match?","paths":["deploy/probe.yaml"]}`); !posted {
+		t.Fatal("valid bulletin must be posted")
+	}
+	if _, posted := call(`{"text":"another","symbols":["pkg.Fn"]}`); !posted {
+		t.Fatal("symbol-only routing must be accepted")
+	}
+	if res, posted := call(`{"text":"over budget","paths":["a.go"]}`); posted || !strings.Contains(res, "budget") {
+		t.Fatalf("budget exhaustion must refuse the post: %q", res)
+	}
+
+	posts := b.Posted()
+	if len(posts) != 2 {
+		t.Fatalf("want 2 published bulletins, got %d", len(posts))
+	}
+	if posts[0].Level != board.LevelObservation || posts[0].From != "u1" || posts[0].Turn != 4 {
+		t.Fatalf("bulletin must be an observation from the posting scope: %+v", posts[0])
+	}
+}
+
+func TestNewRunner_StripsPostBulletinDefWithoutBoard(t *testing.T) {
+	defs := []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "post_bulletin"}},
+	}
+	for _, tc := range []struct {
+		name string
+		deps Deps
+		want int
+	}{
+		{"no board", Deps{MainToolDefs: defs, PostBulletinEnabled: true}, 1},
+		{"gate off", Deps{MainToolDefs: defs, Board: board.New()}, 1},
+		{"board and gate", Deps{MainToolDefs: defs, Board: board.New(), PostBulletinEnabled: true}, 2},
+	} {
+		r := NewRunner(tc.deps)
+		if got := len(r.deps.MainToolDefs); got != tc.want {
+			t.Fatalf("%s: want %d tool defs, got %d", tc.name, tc.want, got)
+		}
 	}
 }
