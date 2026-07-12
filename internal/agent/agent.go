@@ -276,19 +276,20 @@ func New(args Args) *Agent {
 	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
 	// after New returns).
 	a.runner = llmloop.NewRunner(llmloop.Deps{
-		LLMClient:         args.LLMClient,
-		Model:             args.Model,
-		Template:          args.Template,
-		Tools:             args.Tools,
-		MainToolDefs:      args.MainToolDefs,
-		CommentCollector:  args.CommentCollector,
-		CommentWorkerPool: args.CommentWorkerPool,
-		Session:           args.Session,
-		RelocationEnabled: f.Enabled(feature.Relocation),
-		FileDedupEnabled:  f.Enabled(feature.FileDedup),
-		FileEvictEnabled:  f.Enabled(feature.FileEvict),
-		Board:             boardOrNil(a.board),
-		DiffLookup:        a.findDiff,
+		LLMClient:           args.LLMClient,
+		Model:               args.Model,
+		Template:            args.Template,
+		Tools:               args.Tools,
+		MainToolDefs:        args.MainToolDefs,
+		CommentCollector:    args.CommentCollector,
+		CommentWorkerPool:   args.CommentWorkerPool,
+		Session:             args.Session,
+		RelocationEnabled:   f.Enabled(feature.Relocation),
+		FileDedupEnabled:    f.Enabled(feature.FileDedup),
+		FileEvictEnabled:    f.Enabled(feature.FileEvict),
+		Board:               boardOrNil(a.board),
+		PostBulletinEnabled: f.Enabled(feature.PostBulletin),
+		DiffLookup:          a.findDiff,
 	})
 	return a
 }
