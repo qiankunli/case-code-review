@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +17,8 @@ import (
 	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
 	tiktoken "github.com/pkoukk/tiktoken-go"
+
+	"github.com/qiankunli/case-code-review/internal/stdout"
 )
 
 var AppVersion = "dev"
@@ -301,7 +302,7 @@ func (r *LLMRouter) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*C
 			return nil, err
 		}
 		r.park(i)
-		log.Printf("[llm-router] %s failed (%v) — trying next model", r.members[i].label, err)
+		fmt.Fprintf(stdout.Err(), "[llm-router] %s failed (%v) — trying next model\n", r.members[i].label, err)
 	}
 	return nil, fmt.Errorf("all %d models exhausted; last error: %w", len(r.members), lastErr)
 }
