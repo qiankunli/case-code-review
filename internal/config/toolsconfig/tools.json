@@ -67,6 +67,41 @@
     }
   },
   {
+    "name": "post_bulletin",
+    "plan_task": false,
+    "main_task": true,
+    "definition": {
+      "name": "post_bulletin",
+      "description": "Post a short note to the shared review-team board when you notice something OUTSIDE this unit's own diff that another reviewer should verify — typically a cross-file consistency suspicion you cannot confirm from here (a config value vs its consumer elsewhere, a version pinned in one file vs another, a changed contract whose callers live in files you are not reviewing).\n\nYour note is delivered to peer reviewers working on the referenced files as an UNVERIFIED observation — it is not a finding and peers must verify it themselves.\n\n**Rules:**\n- Issues in THIS unit's own diff are reported with code_comment, never here.\n- One note per distinct suspicion; notes are budgeted per review, so spend them on real cross-file doubts.\n- Post and continue your review immediately — peers cannot reply to you.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "One or two sentences: what you observed, and what a peer should verify."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Repo-relative file paths the note is about — routes the note to reviewers of those files. Provide paths, symbols, or both."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbol identifiers the note is about (e.g. 'pkg.Func'), as an alternative or complement to paths."
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    }
+  },
+  {
     "name": "file_read",
     "plan_task": false,
     "main_task": true,

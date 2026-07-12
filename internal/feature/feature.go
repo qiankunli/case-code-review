@@ -48,6 +48,12 @@ const (
 	// incremental injection at turn boundaries. Default OFF (experimental)
 	// until the regression corpus shows cross-file recall or dedup benefit.
 	ReviewTeam Gate = "review_team"
+	// PostBulletin is the model-initiated publish side of the Review Team
+	// (docs/cross-unit.md D2): a `post_bulletin` tool for posting observation-level
+	// suspicions to the board — the channel the cross-file consistency prize
+	// actually rides on (auto facts only say who read what). Effective only when
+	// review_team is also on (no board, no tool).
+	PostBulletin Gate = "post_bulletin"
 )
 
 // def is a gate's registry entry: default state + one-line description.
@@ -85,6 +91,7 @@ var registry = map[Gate]def{
 	FileEvict:      {true, "under token pressure, shed re-derivable file content before LLM compression", false},
 	TypedBriefing:  {true, "briefing preloads as per-file messages (File dedup/evict cover preloads)", false},
 	ReviewTeam:     {false, "Review Team v0: units share an in-memory case board (auto facts + directed injection)", true},
+	PostBulletin:   {false, "post_bulletin tool: the model posts observation-level suspicions to the team board (needs review_team)", true},
 }
 
 // Set is a resolved gate configuration. nil is valid and means "all defaults".

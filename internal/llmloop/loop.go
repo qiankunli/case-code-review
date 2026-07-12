@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,6 +34,14 @@ const (
 	// wrapUpMaxRounds caps the rounds granted once a deadline wrap-up is
 	// issued: what's left of the budget goes to concluding, not digging.
 	wrapUpMaxRounds = 2
+	// maxBulletinsPerLoop caps model-initiated post_bulletin publishes per unit
+	// loop — the board must stay a few cards, not a firehose (docs/cross-unit.md
+	// capacity defenses), and an unbounded tool invites filler posts the same
+	// way unbounded findings invite padding.
+	maxBulletinsPerLoop = 3
+	// maxBulletinTextRunes truncates one bulletin's text so a single verbose
+	// note cannot eat the byte-capped board digest.
+	maxBulletinTextRunes = 300
 )
 
 // wrapUpPrompt forces an explicit verdict when a budget is nearly gone. It
@@ -88,6 +97,11 @@ type Deps struct {
 	// no team (today's behavior, prompt byte-identical). When set, each turn
 	// pulls peers' relevant bulletins and auto-publishes this loop's facts.
 	Board board.Board
+	// PostBulletinEnabled gates the model-initiated post_bulletin tool (the
+	// post_bulletin feature gate). Requires Board: NewRunner strips the tool's
+	// def from MainToolDefs when either is missing, so the model never sees a
+	// tool it cannot use.
+	PostBulletinEnabled bool
 	// DiffLookup is consulted by the code_comment tool path to resolve
 	// line numbers against the file's diff (or against full file content
 	// in scan mode — scan adapters return a synthetic Diff whose
@@ -116,6 +130,14 @@ type Runner struct {
 
 // NewRunner returns a Runner bound to the given dependencies.
 func NewRunner(deps Deps) *Runner {
+	// post_bulletin only exists as a callable tool when there is a board to post
+	// to AND the gate is on; otherwise drop its def so the tool list matches
+	// reality (a def without a handler would burn rounds on NotAvailable).
+	if deps.Board == nil || !deps.PostBulletinEnabled {
+		deps.MainToolDefs = slices.DeleteFunc(slices.Clone(deps.MainToolDefs), func(d llm.ToolDef) bool {
+			return d.Function.Name == tool.PostBulletin.Name()
+		})
+	}
 	return &Runner{deps: deps}
 }
 
@@ -254,6 +276,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []msg.Msg, sc session.
 	truncateReason := ""
 	turn := 0
 	var boardPulled, boardTokens, boardPosted int
+	bulletinBudget := maxBulletinsPerLoop
 	// finish stamps the loop's board activity onto every Outcome return.
 	finish := func(o Outcome) Outcome {
 		o.BoardPulled, o.BoardInjectedTokens, o.BoardPosted = boardPulled, boardTokens, boardPosted
@@ -354,6 +377,24 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []msg.Msg, sc session.
 		hasValidResult := false
 
 		for _, call := range calls {
+			// post_bulletin is loop-owned, not a Registry provider: publishing
+			// needs the scope identity, current turn, and per-loop budget that
+			// only this loop holds. Without a board/gate it falls through to
+			// executeToolCall's NotAvailable path like any unregistered tool.
+			if call.Function.Name == tool.PostBulletin.Name() && r.deps.Board != nil && r.deps.PostBulletinEnabled {
+				r.recordToolCall(tool.PostBulletin.Name())
+				res, posted := r.handlePostBulletin(sc.ID, turn, call, &bulletinBudget)
+				if posted {
+					boardPosted++
+				}
+				results = append(results, tool.ToolCallResult{
+					ToolCallID: call.ID,
+					Name:       call.Function.Name,
+					Result:     res,
+				})
+				hasValidResult = true
+				continue
+			}
 			cp := r.executeToolCall(ctx, sc, call, rec, resp.Alias)
 			if cp.Completed {
 				results = append(results, tool.ToolCallResult{
@@ -383,7 +424,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []msg.Msg, sc session.
 		// never spends a round on it). v0 publishes read + flag facts, keyed by
 		// path so peers watching the same file receive them.
 		if r.deps.Board != nil {
-			for _, b := range extractFacts(sc.ID, turn, calls) {
+			for _, b := range extractFacts(sc, turn, calls) {
 				r.deps.Board.Publish(b)
 				boardPosted++
 			}
@@ -641,13 +682,11 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 //   - code_comment → "flagged an issue in <path>" (cross-unit awareness)
 //
 // All confirmed-level (they are things that happened, not suspicions).
-func extractFacts(scopeID string, turn int, calls []llm.ToolCall) []board.Bulletin {
+// post_bulletin is NOT harvested here: it publishes at execution time, where
+// validation and the per-loop budget decide whether it lands at all.
+func extractFacts(sc session.Scope, turn int, calls []llm.ToolCall) []board.Bulletin {
 	var out []board.Bulletin
 	for _, c := range calls {
-		// The two tools name their path argument differently: file_read takes
-		// "file_path", code_comment takes "path" (see internal/tool). Parse both;
-		// picking the wrong one silently drops the fact (the pre-fix bug: zero
-		// flag facts ever reached the board).
 		var args struct {
 			FilePath  string `json:"file_path"`
 			Path      string `json:"path"`
@@ -664,17 +703,62 @@ func extractFacts(scopeID string, turn int, calls []llm.ToolCall) []board.Bullet
 			if args.StartLine > 0 {
 				text = fmt.Sprintf("read %s:%d-%d", args.FilePath, args.StartLine, args.EndLine)
 			}
-			out = append(out, board.Bulletin{From: scopeID, Turn: turn, Level: board.LevelConfirmed,
+			out = append(out, board.Bulletin{From: sc.ID, Turn: turn, Level: board.LevelConfirmed,
 				Paths: []string{args.FilePath}, Text: text})
 		case "code_comment":
-			if args.Path == "" {
+			// The comment's raw arguments usually carry no "path" at all — the
+			// LLM-facing schema only has the comments array; the anchor path is
+			// injected into the parsed args by executeToolCall. Mirror its
+			// snap-to-scope rule here on the raw value: keep a path that IS a
+			// scope member, anchor everything else to the representative path.
+			path := args.Path
+			if path == "" || !slices.Contains(sc.Paths, path) {
+				path = sc.Path()
+			}
+			if path == "" {
 				continue
 			}
-			out = append(out, board.Bulletin{From: scopeID, Turn: turn, Level: board.LevelConfirmed,
-				Paths: []string{args.Path}, Text: "flagged an issue in " + args.Path})
+			out = append(out, board.Bulletin{From: sc.ID, Turn: turn, Level: board.LevelConfirmed,
+				Paths: []string{path}, Text: "flagged an issue in " + path})
 		}
 	}
 	return out
+}
+
+// handlePostBulletin executes the model-initiated publish side of the Review
+// Team (docs/cross-unit.md D2): an observation-level suspicion routed to peers
+// via the caller-supplied keys. Loop-owned rather than a Registry provider
+// because publishing needs the scope identity, turn, and per-loop budget that
+// only the running loop holds. Returns the tool result for the model and
+// whether a bulletin was actually published.
+func (r *Runner) handlePostBulletin(scopeID string, turn int, call llm.ToolCall, budget *int) (string, bool) {
+	var args struct {
+		Text    string   `json:"text"`
+		Paths   []string `json:"paths"`
+		Symbols []string `json:"symbols"`
+	}
+	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+		return fmt.Sprintf("Error parsing post_bulletin arguments: %v", err), false
+	}
+	args.Text = strings.TrimSpace(args.Text)
+	if args.Text == "" {
+		return "Error: post_bulletin requires a non-empty text.", false
+	}
+	if len(args.Paths) == 0 && len(args.Symbols) == 0 {
+		return "Error: post_bulletin requires at least one routing key (paths or symbols) — without one the note cannot reach the peers reviewing that code.", false
+	}
+	if *budget <= 0 {
+		return "Bulletin budget for this unit is exhausted — note NOT posted. Continue your review; report findings in this unit's diff with code_comment.", false
+	}
+	*budget--
+	// Keep the card a card: the board digest is byte-capped, and one verbose
+	// note must not crowd out peers' (docs/cross-unit.md: summary + pointer).
+	if runes := []rune(args.Text); len(runes) > maxBulletinTextRunes {
+		args.Text = string(runes[:maxBulletinTextRunes]) + "…"
+	}
+	r.deps.Board.Publish(board.Bulletin{From: scopeID, Turn: turn, Level: board.LevelObservation,
+		Paths: args.Paths, Symbols: args.Symbols, Text: args.Text})
+	return "Posted to the team board as an unverified observation; peers reviewing the referenced code will see it. They cannot reply — continue your own review now.", true
 }
 
 // lookupTool returns the provider for a given tool from the registry, or
