@@ -123,7 +123,8 @@
   path+content 短 hash——评论、session finding、复跑重现的同一 finding 由它 join。
 - **打标语法**：对该评论**回复**一行 `ccr:label=<verdict>`（可跟自由文本理由），verdict 词表
   与 §2 判定纪律一致：`important | minor | debatable | wrong`（`wrong` 即误报）。放开头，
-  剩余正文自动作为 note 收录。
+  剩余正文自动作为 note 收录。**纪律：处理 PR comment 时每条都标、不只标误报**——采纳的标
+  important/minor、不采纳的标 wrong/debatable——只标一侧会让 labels 集有偏。
 - **回收**：`eval/labels.py github <owner>/<repo> <pr> [--out f.jsonl]`——识别 ccr 评论
   （fp footer，退化匹配 "devloop code-review" 头）、收人类回复的 label，产出
   `{fingerprint, label, note, path, line, source, at}` 行。**labels 是跨 run 复用的 ground
