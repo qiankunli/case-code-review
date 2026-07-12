@@ -141,6 +141,34 @@
 - **准确性**：finding 层噪声主导（同 arm 两 run 指纹零重合），无系统性回退证据；两 arm 各抓到一条 evict 家族真问题（base 抓到的快照竞态经人工核实为真 → 修复 PR，**回归集自审首次产出实锤 bug**）。
 - 方法论注：run 间 finding 零重合说明质量轴在小 corpus 上只能判"无回退"、不能判优劣——精细质量对比需要更大 corpus 或按 finding 家族聚合。
 
+### 10. reviewbench：corpus × arms 的 worksheet 评测编排（2026-07-12）
+
+replay.py 的升级形态（`eval/reviewbench/`，独立 uv 项目）：编排骨架换成 case-harness 的
+eval_harness——Experiment/Env（对照臂）× corpus（case=merged PR）铺成 Worksheet 大表，
+reconciler 缺啥补啥（几百个 500s 的 run，断点续跑是刚需），报表 pivot 出 per-arm 对比。
+三条评测线共用：gate 消融（Env 换 `config.features`）、ccr vs ocr（Env 换 `config.engine`）、
+全 PR 回放打 metric。
+
+```bash
+cd eval/reviewbench && uv sync
+# corpus：本地 clone 枚举 merged PR（merge 双亲，docs-only 不入册）
+uv run python -m reviewbench.corpus_build <repo-path> --limit 30 --out ../corpus/<name>.json
+# 一键三臂消融（review_team off/on/on+post_bulletin）
+uv run python -m reviewbench.run experiments/gates-review-team.yaml
+# ccr vs ocr
+uv run python -m reviewbench.run experiments/ccr-vs-ocr.yaml
+```
+
+- 质量轴 = `judge_precision`（LLM 对照真实 diff 逐条判 findings 真伪，§2 判定纪律进
+  prompt；0 finding 弃权——正确沉默的对错归 posterior 漏报扫描）；judge 模型从
+  `EVAL_JUDGE_BASE/_KEY/_MODEL` 读，未配置时弃权不报错。judge 是第一道近似，
+  §8.5 的人工标注按 fingerprint 校准它。
+- 成本/健壮性 = measurement 通道（findings 数、duration_s、engine_failed），不进加权分。
+- 每 solve 打 `CCR_EVAL_TAG=reviewbench:<env>:<case>:<uuid>`，session transcript 仍可按
+  tag 捞回做 debrief 级分析（replay.py 的口径不丢）。
+- corpus json 入库（`eval/corpus/`）时不带机器路径，repo 用 `--repo` / yaml 指定。
+- 依赖 case-harness（git 源）；replay.py（stdlib-only、debrief 级聚合）保留，两者互补。
+
 ## References
 
 - ATIF 导出：`ccr export --format atif <session.jsonl>`（session 落盘位置见 `internal/session/`）
@@ -148,4 +176,5 @@
 - 固定回归集重放：`eval/replay.py`（corpus × arms）· corpus 定义：`eval/corpus/`（merge 双亲，仓库相对，可入库；跑出的产物不入库）
 - 后验扫描：`eval/posterior.py`（finding → line_touched/file_touched/untouched）
 - 人工标注回收：`eval/labels.py`（forge 回复 `ccr:label=` → labels jsonl）· 标注资产：`eval/labels/`
+- 评测编排：`eval/reviewbench/`（corpus × arms → worksheet → 报表；experiments/ 有三臂消融与 ccr-vs-ocr 模板）
 - unit / context 模型：`docs/unit-model.md` · `docs/context-model.md`
