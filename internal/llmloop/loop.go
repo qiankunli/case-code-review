@@ -644,17 +644,22 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 func extractFacts(scopeID string, turn int, calls []llm.ToolCall) []board.Bulletin {
 	var out []board.Bulletin
 	for _, c := range calls {
+		// The two tools name their path argument differently: file_read takes
+		// "file_path", code_comment takes "path" (see internal/tool). Parse both;
+		// picking the wrong one silently drops the fact (the pre-fix bug: zero
+		// flag facts ever reached the board).
 		var args struct {
 			FilePath  string `json:"file_path"`
+			Path      string `json:"path"`
 			StartLine int    `json:"start_line"`
 			EndLine   int    `json:"end_line"`
 		}
 		_ = json.Unmarshal([]byte(c.Function.Arguments), &args)
-		if args.FilePath == "" {
-			continue
-		}
 		switch c.Function.Name {
 		case "file_read":
+			if args.FilePath == "" {
+				continue
+			}
 			text := "read " + args.FilePath
 			if args.StartLine > 0 {
 				text = fmt.Sprintf("read %s:%d-%d", args.FilePath, args.StartLine, args.EndLine)
@@ -662,8 +667,11 @@ func extractFacts(scopeID string, turn int, calls []llm.ToolCall) []board.Bullet
 			out = append(out, board.Bulletin{From: scopeID, Turn: turn, Level: board.LevelConfirmed,
 				Paths: []string{args.FilePath}, Text: text})
 		case "code_comment":
+			if args.Path == "" {
+				continue
+			}
 			out = append(out, board.Bulletin{From: scopeID, Turn: turn, Level: board.LevelConfirmed,
-				Paths: []string{args.FilePath}, Text: "flagged an issue in " + args.FilePath})
+				Paths: []string{args.Path}, Text: "flagged an issue in " + args.Path})
 		}
 	}
 	return out

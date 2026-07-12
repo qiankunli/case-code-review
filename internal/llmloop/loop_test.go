@@ -105,3 +105,25 @@ func TestExecuteToolCall_CodeCommentKeepsScopeMemberPath(t *testing.T) {
 		t.Fatalf("member path must be kept, got %+v", comments)
 	}
 }
+
+func TestExtractFacts_ToolSpecificPathArgs(t *testing.T) {
+	calls := []llm.ToolCall{
+		{Function: llm.FunctionCall{Name: "file_read",
+			Arguments: `{"file_path":"a.go","start_line":3,"end_line":9}`}},
+		// code_comment names its path argument "path", not "file_path" — the
+		// flag fact must still be harvested (regression: it was silently dropped).
+		{Function: llm.FunctionCall{Name: "code_comment",
+			Arguments: `{"path":"b.go","content":"issue"}`}},
+		{Function: llm.FunctionCall{Name: "code_comment", Arguments: `{"content":"no path"}`}},
+	}
+	facts := extractFacts("scope", 2, calls)
+	if len(facts) != 2 {
+		t.Fatalf("want 2 facts (read + flag), got %d: %+v", len(facts), facts)
+	}
+	if facts[0].Text != "read a.go:3-9" || facts[0].Paths[0] != "a.go" {
+		t.Fatalf("unexpected read fact: %+v", facts[0])
+	}
+	if facts[1].Text != "flagged an issue in b.go" || facts[1].Paths[0] != "b.go" {
+		t.Fatalf("unexpected flag fact: %+v", facts[1])
+	}
+}
