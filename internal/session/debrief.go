@@ -3,6 +3,8 @@ package session
 import (
 	"fmt"
 	"time"
+
+	"github.com/qiankunli/case-code-review/internal/stdout"
 )
 
 // Debrief is a unit's terminal record — one line per review Unit written when
@@ -75,7 +77,7 @@ func (ss *ScopeSession) Close(d Debrief) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	if ss.state != scopeOpen {
-		fmt.Printf("[ccr session] warning: scope %q closed twice; keeping the first debrief\n", ss.ID)
+		fmt.Fprintf(stdout.Err(), "[ccr session] warning: scope %q closed twice; keeping the first debrief\n", ss.ID)
 		return
 	}
 	if ss.pendingAsync > 0 {

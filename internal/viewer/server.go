@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/qiankunli/case-code-review/internal/stdout"
 )
 
 //go:embed templates/*.html static/style.css
@@ -163,7 +165,7 @@ func renderTemplate(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, data); err != nil {
 		// Partially written — just log
-		fmt.Printf("[viewer] template execution error: %v\n", err)
+		fmt.Fprintf(stdout.Err(), "[viewer] template execution error: %v\n", err)
 	}
 }
 
