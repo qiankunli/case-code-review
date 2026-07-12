@@ -44,7 +44,8 @@ from reviewbench.adapter import (
 )
 
 
-def load_experiment(path: Path, only: str | None, repo_override: str | None = None) -> Experiment:
+def load_experiment(path: Path, only: str | None, repo_override: str | None = None,
+                    metric_names: list[str] | None = None) -> Experiment:
     cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
     corpus_path = (path.parent / cfg["corpus"]).resolve()
     corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
@@ -60,19 +61,18 @@ def load_experiment(path: Path, only: str | None, repo_override: str | None = No
             desc=e.get("title", e["name"]),
         )
         for i, e in enumerate(corpus["entries"])
-        if only is None or only in e["name"]
+        if not only or only in e["name"]
     ]
     if not cases:
         raise SystemExit(f"no corpus entries matched (only={only!r})")
 
-    metrics = ["judge_precision", "findings", "duration_s", "engine_failed"]
     return Experiment(
         name=cfg["name"],
         description=cfg.get("description", ""),
         target=Target(config={"engine": cfg.get("engine", "ccr"), "features": ""}),
         evalsets=[EvalSet(corpus=Path(corpus_path).stem, cases=cases)],
         envs=[Env(**e) for e in cfg.get("envs", [])] or [Env(name="base")],
-        metrics=metrics,
+        metrics=metric_names or [],
     )
 
 
@@ -86,8 +86,9 @@ def main() -> int:
     ap.add_argument("--runs-dir", type=Path, default=Path("runs"))
     args = ap.parse_args()
 
-    exp = load_experiment(args.experiment, args.only, args.repo)
     metrics = [JudgePrecision(), FindingCount(), DurationS(), EngineFailed()]
+    exp = load_experiment(args.experiment, args.only, args.repo,
+                          metric_names=[m.NAME for m in metrics])
     ws = asyncio.run(run_experiment(
         exp, RepoProvisioner(), ReviewSolver(), metrics,
         runs_dir=args.runs_dir, fresh=args.fresh, config_path=args.experiment,
