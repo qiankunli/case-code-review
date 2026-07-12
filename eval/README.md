@@ -114,6 +114,24 @@
 - **Finding**（每条最终交付的 finding 一条记录，过滤后写；transcript 里的 code_comment tool call 是过滤前的，会多算）：`fingerprint`（path+content 的短 hash，**刻意不含行号**——relocation 和后续编辑会挪行，指纹的职责是让复跑复现的同一 finding join 到同一人工标注）+ `symbol_id` + 行区间；配 manifest 的 `git_head` 锚点，后验扫描从这里向前走 git 历史（"后续 commit 是否改了 finding 指过的行/符号" → important 实锤 / 漏报候选）。
 - **后验扫描脚本**：`eval/posterior.py <session.jsonl|dir> [--labels out.jsonl]`——按锚点（diffCommit > diffTo > git_head）对每条 finding 走 git line-log，判 `line_touched`（实锤候选，附 commit）/ `file_touched` / `untouched`；候选仍需人工对照 commit 与 finding 文本确认（§2 判定纪律）。首次自验：dogfood session 的两条 os.Stderr finding 精确指回修它们的 commit。
 
+### 8.5 人工标注统一约定：ccr:fp footer + ccr:label 回复（2026-07-12）
+
+质量轴 ground truth 的第二来源（第一是 §1 后验实锤）：**人在 finding 出现的地方顺手打标**，工具负责把标注收回 fingerprint 键的 labels jsonl。三件套：
+
+- **可关联**：任何 surface（GitHub/GitLab 行级评论、汇总列表）发布 finding 时，正文末尾带
+  `ccr:fp=<fingerprint>` footer（inline 评论用 `<sub>` 包裹防碍眼）。fingerprint 即 §8 的
+  path+content 短 hash——评论、session finding、复跑重现的同一 finding 由它 join。
+- **打标语法**：对该评论**回复**一行 `ccr:label=<verdict>`（可跟自由文本理由），verdict 词表
+  与 §2 判定纪律一致：`important | minor | debatable | wrong`（`wrong` 即误报）。放开头，
+  剩余正文自动作为 note 收录。
+- **回收**：`eval/labels.py github <owner>/<repo> <pr> [--out f.jsonl]`——识别 ccr 评论
+  （fp footer，退化匹配 "devloop code-review" 头）、收人类回复的 label，产出
+  `{fingerprint, label, note, path, line, source, at}` 行。**labels 是跨 run 复用的 ground
+  truth 资产，入库**（`eval/labels/<owner>-<repo>.jsonl`，与"产物不入库"的 run 输出不同）；
+  posterior 的后验 label 与人工 label 在 eval 汇总时按 fingerprint 合并，人工优先。
+
+设计取舍：用**回复文本**而不是 emoji reaction——reaction 无词表、跨 forge API 不一致、不可携带理由；文本标记 grep 即得，且回复线程天然挂在 finding 上。误报样本（`wrong`）积累后喂 review-filter 的回归集：§4.4 型"教科书事实错套"（首例：PR 评审中"sort_keys 只排顶层"——实际 `json.dumps(sort_keys=True)` 递归排序）。
+
 ### 9. typed_briefing 翻转许可证（2026-07-05，replay.py 首次全量应用）
 
 `eval/replay.py` 对 ccr-self corpus（6 PR × base/typed × 2 runs，70 unit/arm）的判定：
@@ -129,4 +147,5 @@
 - 失败分类法与 per-chain 判定：`eval/trajectory_judge.py` 顶部 docstring
 - 固定回归集重放：`eval/replay.py`（corpus × arms）· corpus 定义：`eval/corpus/`（merge 双亲，仓库相对，可入库；跑出的产物不入库）
 - 后验扫描：`eval/posterior.py`（finding → line_touched/file_touched/untouched）
+- 人工标注回收：`eval/labels.py`（forge 回复 `ccr:label=` → labels jsonl）· 标注资产：`eval/labels/`
 - unit / context 模型：`docs/unit-model.md` · `docs/context-model.md`
