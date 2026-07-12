@@ -78,8 +78,12 @@ def main() -> int:
 
     try:
         corpus = build(args.repo, args.branch, args.limit, args.include_docs)
-    except subprocess.CalledProcessError as e:
-        raise SystemExit(f"git failed（repo/branch 对吗？）: {e.stderr.strip()[:200]}") from e
+    except subprocess.SubprocessError as e:
+        # SubprocessError 同时覆盖 CalledProcessError 与 TimeoutExpired（timeout=120 抛后者）
+        stderr = getattr(e, "stderr", None) or ""
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        raise SystemExit(f"git failed（repo/branch 对吗？超时？）: {stderr.strip()[:200] or e}") from e
     except FileNotFoundError as e:
         raise SystemExit(f"not a directory or git missing: {e}") from e
     text = json.dumps(corpus, ensure_ascii=False, indent=2) + "\n"
