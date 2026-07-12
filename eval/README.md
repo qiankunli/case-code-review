@@ -125,9 +125,16 @@
   与 §2 判定纪律一致：`important | minor | debatable | wrong`（`wrong` 即误报）。放开头，
   剩余正文自动作为 note 收录。**纪律：处理 PR comment 时每条都标、不只标误报**——采纳的标
   important/minor、不采纳的标 wrong/debatable——只标一侧会让 labels 集有偏。
+- **病因 tag（可选）**：note 里带 `#tag`，harvester 提取进 `tags` 字段。推荐词表对齐 §4
+  失败模式：`#textbook`（教科书事实错套）`#padding`（凑数附注型）`#pre-existing`
+  `#stale`（已过时/已修）`#cross-file` `#big-pr-silence`；开放集合不强制——verdict 定真伪，
+  tag 记病因，review-filter 回归集按 tag 分桶取料。
+- **漏报标记 `ccr:missed`**：ccr 没报、人发现了的问题，对 diff 任意行**直接评论**（不是回复）
+  `ccr:missed — <一句描述>`，收成 `label=missed`（无 fingerprint，靠 path/line 定位）——
+  召回侧的负样本，正是 ccr 最痛的短板（§4.1/4.2），缺这半边的 ground truth 是偏的。
 - **回收**：`eval/labels.py github <owner>/<repo> <pr> [--out f.jsonl]`——识别 ccr 评论
-  （fp footer，退化匹配 "devloop code-review" 头）、收人类回复的 label，产出
-  `{fingerprint, label, note, path, line, source, at}` 行。**labels 是跨 run 复用的 ground
+  （fp footer，退化匹配 "devloop code-review" 头）、收人类回复的 label 与 `ccr:missed`，
+  产出 `{fingerprint, label, note, tags, path, line, source, at}` 行。**labels 是跨 run 复用的 ground
   truth 资产，入库**（`eval/labels/<owner>-<repo>.jsonl`，与"产物不入库"的 run 输出不同）；
   posterior 的后验 label 与人工 label 在 eval 汇总时按 fingerprint 合并，人工优先。
 

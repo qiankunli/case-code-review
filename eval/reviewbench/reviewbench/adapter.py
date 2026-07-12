@@ -151,8 +151,16 @@ class JudgePrecision(BaseMetric):
         if not verdicts:
             return self.na("judge returned no parseable verdicts")
         real = sum(1 for v in verdicts.values() if v == "real")
+        # 逐条 verdict 带 fingerprint 留痕：没有它就无法拿 §8.5 的人工标注按
+        # fingerprint 校准 judge（judge vs human 的一致率是质量轴自身的质检）
+        per = [
+            {"fp": findings[i].get("fingerprint", ""), "v": v}
+            for i, v in sorted(verdicts.items())
+            if 0 <= i < len(findings)
+        ]
         return self.quality(real / len(verdicts), judgement=json.dumps(
-            {"real": real, "judged": len(verdicts), "total": len(findings)}))
+            {"real": real, "judged": len(verdicts), "total": len(findings), "verdicts": per},
+            ensure_ascii=False))
 
 
 class FindingCount(BaseMetric):

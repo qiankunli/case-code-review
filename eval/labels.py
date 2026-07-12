@@ -4,9 +4,13 @@
 Convention (eval/README §8.5): a ccr-posted review comment carries a
 `ccr:fp=<fingerprint>` footer; a human replies to it with a line starting
 `ccr:label=<important|minor|debatable|wrong>` (free-text rationale may follow,
-on the same line or below — it becomes `note`). This script joins the two and
-emits one jsonl line per label, keyed by fingerprint — the same join key
-posterior.py labels use, so human and posterior labels merge in eval rollups.
+on the same line or below — it becomes `note`; `#tag`s in the note are extracted
+into `tags`, vocabulary aligned with README §4 failure modes). Additionally a
+human may comment `ccr:missed — <desc>` directly on any diff line (NOT a reply)
+to record a miss ccr never reported — the recall-side negative sample, emitted
+with `label=missed` and no fingerprint. This script joins them all and emits one
+jsonl line per label, keyed by fingerprint — the same join key posterior.py
+labels use, so human and posterior labels merge in eval rollups.
 
 Usage:
     python3 eval/labels.py github <owner>/<repo> <pr-number> [--out labels.jsonl]
@@ -36,6 +40,12 @@ from pathlib import Path
 
 FP_RE = re.compile(r"ccr:fp=([0-9a-f]{6,40})")
 LABEL_RE = re.compile(r"^\s*ccr:label=(important|minor|debatable|wrong)\b[ \t:—-]*(.*)$", re.M)
+# missed 是"ccr 没报、人发现了"的负样本——对 diff 任意行直接评论，不是对 ccr 评论的回复。
+# 它没有 fingerprint（没有 finding 可指），靠 path/line + 描述入册，补齐召回侧 ground truth。
+MISSED_RE = re.compile(r"^\s*ccr:missed\b[ \t:—-]*(.*)$", re.M)
+# 病因 tag：note 里的 #tag（如 #textbook #padding #pre-existing #cross-file），
+# 推荐词表对齐 eval/README §4 失败模式；开放集合，不在此枚举校验。
+TAG_RE = re.compile(r"#([a-z][a-z0-9-]+)")
 CCR_HEAD = "devloop code-review"  # fp-less fallback: recognize ccr comments by header
 
 
@@ -61,7 +71,30 @@ def harvest_github(repo: str, pr: int) -> list[dict]:
     by_id = {c["id"]: c for c in comments}
     labels: list[dict] = []
     for c in comments:
-        m = LABEL_RE.search(c.get("body") or "")
+        body = c.get("body") or ""
+
+        # ccr:missed —— 漏报负样本：人对 diff 行直接评论，无父级 ccr finding
+        mm = MISSED_RE.search(body)
+        if mm and not c.get("in_reply_to_id"):
+            note = (mm.group(1) + body[mm.end():]).strip()
+            labels.append(
+                {
+                    "fingerprint": None,
+                    "label": "missed",
+                    "note": note,
+                    "tags": sorted(set(TAG_RE.findall(note))),
+                    "path": c.get("path"),
+                    "line": c.get("line") or c.get("original_line"),
+                    "source": f"github:{repo}#{pr}",
+                    "comment_url": c.get("html_url"),
+                    "reply_id": c["id"],
+                    "by": (c.get("user") or {}).get("login"),
+                    "at": c.get("created_at"),
+                }
+            )
+            continue
+
+        m = LABEL_RE.search(body)
         parent = by_id.get(c.get("in_reply_to_id") or -1)
         if not m or parent is None:
             continue
@@ -70,12 +103,13 @@ def harvest_github(repo: str, pr: int) -> list[dict]:
             continue  # a labelled reply, but not on a ccr finding
         fp = FP_RE.search(pbody)
         # note = same-line remainder + any following lines of the reply
-        note = (m.group(2) + (c.get("body") or "")[m.end():]).strip()
+        note = (m.group(2) + body[m.end():]).strip()
         labels.append(
             {
                 "fingerprint": fp.group(1) if fp else None,
                 "label": m.group(1),
                 "note": note,
+                "tags": sorted(set(TAG_RE.findall(note))),
                 "path": parent.get("path"),
                 "line": parent.get("line") or parent.get("original_line"),
                 "source": f"github:{repo}#{pr}",
