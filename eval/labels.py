@@ -13,8 +13,9 @@ Usage:
 
 Output line shape:
     {"fingerprint": "abc123def456" | null, "label": "wrong", "note": "...",
-     "path": "x/y.py", "line": 216, "source": "github:owner/repo#9",
-     "comment_url": "...", "reply_id": 123, "by": "login", "at": "..."}
+     "tags": ["textbook"], "path": "x/y.py", "line": 216,
+     "source": "github:owner/repo#9", "comment_url": "...", "reply_id": 123,
+     "by": "login", "at": "..."}
 
 - fingerprint is null for comments posted before the footer convention —
   path/line are kept so the label can be back-filled by hand.
