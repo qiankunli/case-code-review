@@ -25,7 +25,7 @@ _PR_RE = re.compile(r"Merge pull request #(\d+)(?: from \S+)?")
 
 def _git(repo: str, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", repo, *args], capture_output=True, text=True, check=True
+        ["git", "-C", repo, *args], capture_output=True, text=True, check=True, timeout=120
     ).stdout
 
 
@@ -76,7 +76,12 @@ def main() -> int:
     ap.add_argument("--out", type=Path)
     args = ap.parse_args()
 
-    corpus = build(args.repo, args.branch, args.limit, args.include_docs)
+    try:
+        corpus = build(args.repo, args.branch, args.limit, args.include_docs)
+    except subprocess.CalledProcessError as e:
+        raise SystemExit(f"git failed（repo/branch 对吗？）: {e.stderr.strip()[:200]}") from e
+    except FileNotFoundError as e:
+        raise SystemExit(f"not a directory or git missing: {e}") from e
     text = json.dumps(corpus, ensure_ascii=False, indent=2) + "\n"
     if args.out:
         args.out.write_text(text, encoding="utf-8")

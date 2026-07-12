@@ -54,7 +54,7 @@ class ReviewSolver(Solver):
         cfg = target.config or {}
         engine = cfg.get("engine", "ccr")
         cmd = [engine, "review", "--from", rng["from"], "--to", rng["to"], "--format", "json"]
-        for kv in filter(None, (s.strip() for s in str(cfg.get("features", "")).split(","))):
+        for kv in filter(None, (s.strip() for s in str(cfg.get("features") or "").split(","))):
             cmd += ["--feature", kv]
         env = dict(os.environ, CCR_EVAL_TAG=f"reviewbench:{row.env}:{row.case_id}:{uuid.uuid4().hex[:8]}")
         t0 = time.monotonic()
@@ -124,10 +124,12 @@ class JudgePrecision(BaseMetric):
         if not self._client.ready():
             return self.na("judge LLM not configured (EVAL_JUDGE_BASE/_KEY/_MODEL)")
         rng = json.loads(sample.query)
-        diff = subprocess.run(
+        # to_thread + 超时：score 在事件循环里并发跑，阻塞的 git 会拖住所有 solve
+        diff = (await asyncio.to_thread(
+            subprocess.run,
             ["git", "-C", rng["repo"], "diff", rng["from"], rng["to"]],
-            capture_output=True, text=True,
-        ).stdout[:_DIFF_CAP]
+            capture_output=True, text=True, timeout=60,
+        )).stdout[:_DIFF_CAP]
         listing = "\n".join(
             f'{i}. [{f.get("path", "?")}:{f.get("start_line", 0)}-{f.get("end_line", 0)}] '
             f'{(f.get("content") or "").strip()[:500]}'
