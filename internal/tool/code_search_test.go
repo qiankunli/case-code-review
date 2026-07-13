@@ -396,3 +396,17 @@ func TestGitGrep_NonGitDirectoryNoMatch(t *testing.T) {
 		t.Errorf("expected 'No matches found', got: %q", out)
 	}
 }
+
+func TestCodeSearch_RejectsTraversalPathspecs(t *testing.T) {
+	p := &CodeSearchProvider{FileReader: &FileReader{RepoDir: t.TempDir()}}
+	out, err := p.Execute(context.Background(), map[string]any{
+		"search_text":   "secret",
+		"file_patterns": []any{"../outside/*.go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "must not contain ..") {
+		t.Fatalf("traversal pathspec must be rejected, got: %q", out)
+	}
+}
