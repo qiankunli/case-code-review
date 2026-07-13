@@ -61,7 +61,12 @@ func renderComment(comment model.LlmComment) {
 	fmt.Printf("\n\033[2m─── %s:%d-%d ───\033[0m\n", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine)
 
 	if comment.Content != "" {
-		for _, ln := range wrapByRunes(sanitizeTerminal(comment.Content), 100) {
+		content := sanitizeTerminal(comment.Content)
+		// [category · severity] 徽章拼在正文前一起折行；两字段都缺时输出不变
+		if badge := findingBadge(comment); badge != "" {
+			content = badge + " " + content
+		}
+		for _, ln := range wrapByRunes(content, 100) {
 			fmt.Printf("%s\n", ln)
 		}
 		fmt.Println()
@@ -444,4 +449,19 @@ func statusBadge(status string) string {
 	default:
 		return "[?]"
 	}
+}
+
+// findingBadge renders the compact "[category · severity]" tag for a finding;
+// empty when neither structured field is present so legacy output is unchanged.
+func findingBadge(comment model.LlmComment) string {
+	c, s := sanitizeTerminal(comment.Category), sanitizeTerminal(comment.Severity)
+	switch {
+	case c != "" && s != "":
+		return fmt.Sprintf("[%s · %s]", c, s)
+	case c != "":
+		return fmt.Sprintf("[%s]", c)
+	case s != "":
+		return fmt.Sprintf("[%s]", s)
+	}
+	return ""
 }

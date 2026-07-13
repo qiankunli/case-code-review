@@ -646,6 +646,8 @@ func (a *Agent) persistFindings(comments []model.LlmComment) {
 			Fingerprint: c.Fingerprint,
 			Alias:       c.Alias,
 			Content:     c.Content,
+			Category:    c.Category,
+			Severity:    c.Severity,
 		})
 	}
 	a.session.WriteFindings(findings)
