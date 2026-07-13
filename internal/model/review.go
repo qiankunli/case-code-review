@@ -24,6 +24,15 @@ type LlmComment struct {
 	// pool spreads files across models (e.g. round-robin). Empty for single-model runs
 	// or when no alias is configured.
 	Alias string `json:"alias,omitempty"`
+	// Category is the engine-declared finding class, one of: bug, security,
+	// performance, maintainability, test, style, documentation, other. Structured so
+	// consumers group/filter/gate without re-parsing content; values outside the
+	// vocabulary are dropped at parse time (a free-form word would fragment grouping).
+	Category string `json:"category,omitempty"`
+	// Severity is the engine-declared importance, one of: critical, high, medium, low.
+	// Deliberately self-reported: its DISAGREEMENT with human labels
+	// (important/minor/… — eval/README §8.5) is itself a calibration signal.
+	Severity string `json:"severity,omitempty"`
 }
 
 // CodeReviewResult holds raw LLM-generated review suggestion for a code segment.
