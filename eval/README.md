@@ -132,10 +132,13 @@
 - **漏报标记 `ccr:missed`**：ccr 没报、人发现了的问题，对 diff 任意行**直接评论**（不是回复）
   `ccr:missed — <一句描述>`，收成 `label=missed`（无 fingerprint，靠 path/line 定位）——
   召回侧的负样本，正是 ccr 最痛的短板（§4.1/4.2），缺这半边的 ground truth 是偏的。
-- **回收**：`eval/labels.py github <owner>/<repo> <pr> [--out f.jsonl]`——识别 ccr 评论
-  （fp footer，退化匹配 "devloop code-review" 头）、收人类回复的 label 与 `ccr:missed`，
-  产出 `{fingerprint, label, note, tags, path, line, source, at}` 行。**labels 是跨 run 复用的 ground
-  truth 资产，入库**（`eval/labels/<owner>-<repo>.jsonl`，与"产物不入库"的 run 输出不同）；
+- **回收**：`eval/labels.py github <owner>/<repo> <pr>` 或
+  `eval/labels.py gitlab <group/proj> <mr-iid> --host <host>`（任意 GitLab-API forge；
+  token 走 `GITLAB_TOKEN`、host 走 `--host`/`GITLAB_HOST`——实例信息只在调用侧，不进仓）——
+  识别 ccr 评论（fp footer，退化匹配 "devloop code-review" 头）、收人类回复的 label 与
+  `ccr:missed`，产出 `{fingerprint, label, note, tags, path, line, source, at}` 行。
+  **labels 是跨 run 复用的 ground truth 资产，入库**（`eval/labels/<owner>-<repo>.jsonl`，
+  GitLab 仓按 path 以 `-` 连接命名；与"产物不入库"的 run 输出不同）；
   posterior 的后验 label 与人工 label 在 eval 汇总时按 fingerprint 合并，人工优先。
 
 设计取舍：用**回复文本**而不是 emoji reaction——reaction 无词表、跨 forge API 不一致、不可携带理由；文本标记 grep 即得，且回复线程天然挂在 finding 上。误报样本（`wrong`）积累后喂 review-filter 的回归集：§4.4 型"教科书事实错套"（首例：PR 评审中"sort_keys 只排顶层"——实际 `json.dumps(sort_keys=True)` 递归排序）。

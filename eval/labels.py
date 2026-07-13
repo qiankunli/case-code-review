@@ -14,6 +14,7 @@ labels use, so human and posterior labels merge in eval rollups.
 
 Usage:
     python3 eval/labels.py github <owner>/<repo> <pr-number> [--out labels.jsonl]
+    python3 eval/labels.py gitlab <group/subgroup/proj> <mr-iid> --host <gitlab-host> [--out labels.jsonl]
 
 Output line shape:
     {"fingerprint": "abc123def456" | null, "label": "wrong", "note": "...",
@@ -23,20 +24,25 @@ Output line shape:
 
 - fingerprint is null for comments posted before the footer convention —
   path/line are kept so the label can be back-filled by hand.
-- `--out` appends and dedups on reply_id, so re-harvesting a PR is idempotent.
+- `--out` appends and dedups on (source, reply_id), so re-harvesting is idempotent.
 - v1 harvests inline (diff-anchored) threads only; labels on the summary
   comment's fallback list have no per-finding thread to hang on.
 
-Requires a `gh` CLI authenticated for the target repo.
+github needs an authenticated `gh` CLI. gitlab (any GitLab-API forge, incl.
+self-hosted) needs `GITLAB_TOKEN` in the env and the instance host via `--host`
+or `GITLAB_HOST` — host/token stay invocation-side, never in this repo.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 FP_RE = re.compile(r"ccr:fp=([0-9a-f]{6,40})")
@@ -123,26 +129,121 @@ def harvest_github(repo: str, pr: int) -> list[dict]:
     return labels
 
 
+def _gitlab_json(host: str, token: str, path: str) -> list[dict]:
+    items: list[dict] = []
+    page = 1
+    while True:
+        url = f"https://{host}/api/v4/{path}?per_page=100&page={page}"
+        req = urllib.request.Request(url, headers={"PRIVATE-TOKEN": token})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            batch = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(batch, list):
+            return [batch]
+        items.extend(batch)
+        if len(batch) < 100:
+            return items
+        page += 1
+
+
+def harvest_gitlab(host: str, project: str, mr: int) -> list[dict]:
+    """GitLab 的线程是一等公民：discussion.notes[0] 即 ccr finding（fp footer），
+    后续 notes 是回复——不用像 GitHub 那样靠 in_reply_to_id 自己拼父子关系。"""
+    token = (os.environ.get("GITLAB_TOKEN") or "").strip()
+    if not token:
+        sys.exit("gitlab harvest needs GITLAB_TOKEN in the env")
+    proj = urllib.parse.quote(project, safe="")
+    discussions = _gitlab_json(host, token, f"projects/{proj}/merge_requests/{mr}/discussions")
+    source = f"gitlab:{host}/{project}!{mr}"
+    labels: list[dict] = []
+    for d in discussions:
+        notes = [n for n in d.get("notes") or [] if not n.get("system")]
+        if not notes:
+            continue
+        head = notes[0]
+        hbody = head.get("body") or ""
+        # position 只在 diff-anchored discussion 上有；plain note 的 path/line 为 null
+        pos = head.get("position") or {}
+        path = pos.get("new_path") or pos.get("old_path")
+        line = pos.get("new_line") or pos.get("old_line")
+        head_url = f"https://{host}/{project}/-/merge_requests/{mr}#note_{head['id']}"
+
+        # ccr:missed —— 漏报负样本：人开的新 discussion，不是对 ccr finding 的回复
+        mm = MISSED_RE.search(hbody)
+        if mm:
+            note = (mm.group(1) + hbody[mm.end():]).strip()
+            labels.append(
+                {
+                    "fingerprint": None,
+                    "label": "missed",
+                    "note": note,
+                    "tags": sorted(set(TAG_RE.findall(note))),
+                    "path": path,
+                    "line": line,
+                    "source": source,
+                    "comment_url": head_url,
+                    "reply_id": head["id"],
+                    "by": (head.get("author") or {}).get("username"),
+                    "at": head.get("created_at"),
+                }
+            )
+            continue
+
+        if CCR_HEAD not in hbody and not FP_RE.search(hbody):
+            continue  # not a ccr finding thread
+        fp = FP_RE.search(hbody)
+        for reply in notes[1:]:
+            rbody = reply.get("body") or ""
+            m = LABEL_RE.search(rbody)
+            if not m:
+                continue
+            note = (m.group(2) + rbody[m.end():]).strip()
+            labels.append(
+                {
+                    "fingerprint": fp.group(1) if fp else None,
+                    "label": m.group(1),
+                    "note": note,
+                    "tags": sorted(set(TAG_RE.findall(note))),
+                    "path": path,
+                    "line": line,
+                    "source": source,
+                    "comment_url": head_url,
+                    "reply_id": reply["id"],
+                    "by": (reply.get("author") or {}).get("username"),
+                    "at": reply.get("created_at"),
+                }
+            )
+    return labels
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("forge", choices=["github"])
-    ap.add_argument("repo", help="owner/repo")
-    ap.add_argument("pr", type=int)
-    ap.add_argument("--out", type=Path, help="append (deduped on reply_id); default: stdout")
+    ap.add_argument("forge", choices=["github", "gitlab"])
+    ap.add_argument("repo", help="owner/repo (github) or group/subgroup/proj (gitlab)")
+    ap.add_argument("pr", type=int, help="PR number (github) or MR iid (gitlab)")
+    ap.add_argument("--host", default=os.environ.get("GITLAB_HOST"),
+                    help="gitlab instance host (or GITLAB_HOST env)")
+    ap.add_argument("--out", type=Path, help="append (deduped on source+reply_id); default: stdout")
     args = ap.parse_args()
 
-    labels = harvest_github(args.repo, args.pr)
+    if args.forge == "github":
+        labels = harvest_github(args.repo, args.pr)
+    else:
+        if not args.host:
+            ap.error("gitlab needs --host (or GITLAB_HOST env)")
+        labels = harvest_gitlab(args.host, args.repo, args.pr)
     if not args.out:
         for rec in labels:
             print(json.dumps(rec, ensure_ascii=False))
         return 0
 
-    seen: set[int] = set()
+    # dedup 键带 source：不同 forge 的 note/comment id 是独立序列，裸 id 会跨源撞
+    seen: set[tuple] = set()
     if args.out.exists():
         for line in args.out.read_text(encoding="utf-8").splitlines():
             if line.strip():
-                seen.add(json.loads(line).get("reply_id"))
-    fresh = [r for r in labels if r["reply_id"] not in seen]
+                rec = json.loads(line)
+                seen.add((rec.get("source"), rec.get("reply_id")))
+    fresh = [r for r in labels if (r["source"], r["reply_id"]) not in seen]
     with args.out.open("a", encoding="utf-8") as f:
         for rec in fresh:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
