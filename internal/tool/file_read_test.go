@@ -330,6 +330,28 @@ func TestExecute_Truncation(t *testing.T) {
 	}
 }
 
+// A reversed range (start_line > end_line) is a model tool-call mistake and
+// must come back as a recoverable observation (string + nil error), not a
+// fatal Go error that aborts the whole review.
+func TestExecute_ReversedRange_ReturnsRecoverableError(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "c.txt", "a\nb\nc\nd\ne\n")
+
+	p := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	result, err := p.Execute(context.Background(), map[string]any{
+		"file_path":  "c.txt",
+		"start_line": float64(300),
+		"end_line":   float64(100),
+	})
+	if err != nil {
+		t.Fatalf("reversed range must not return a fatal error, got: %v", err)
+	}
+	if !strings.Contains(result, "invalid line range") {
+		t.Errorf("expected invalid line range message, got: %q", result)
+	}
+}
+
 func TestExecute_WithEndLine(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "c.txt", "a\nb\nc\nd\ne\n")
