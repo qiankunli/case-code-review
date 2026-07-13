@@ -191,6 +191,8 @@ type Finding struct {
 	Fingerprint string
 	Alias       string
 	Content     string
+	Category    string // engine-declared class (bug/security/…) — see model.LlmComment
+	Severity    string // engine-declared importance (critical/high/medium/low)
 }
 
 // WriteFindings persists the run's delivered findings, one "finding" record each.

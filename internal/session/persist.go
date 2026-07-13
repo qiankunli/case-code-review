@@ -408,6 +408,12 @@ func (jw *jsonlWriter) WriteFinding(f Finding) string {
 	if f.Alias != "" {
 		rec["alias"] = f.Alias
 	}
+	if f.Category != "" {
+		rec["category"] = f.Category
+	}
+	if f.Severity != "" {
+		rec["severity"] = f.Severity
+	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid

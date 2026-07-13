@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/qiankunli/case-code-review/internal/model"
 )
@@ -68,6 +69,12 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 		if thinking, ok := obj["thinking"].(string); ok {
 			cm.Thinking = thinking
 		}
+		if category, ok := obj["category"].(string); ok {
+			cm.Category = normalizeEnum(category, validCategories)
+		}
+		if severity, ok := obj["severity"].(string); ok {
+			cm.Severity = normalizeEnum(severity, validSeverities)
+		}
 		if path, ok := args["path"].(string); ok {
 			cm.Path = path
 		}
@@ -79,4 +86,24 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 		comments = append(comments, cm)
 	}
 	return comments, ""
+}
+
+// 结构化字段词表（与 tools.json 的 enum 同步）。归一化在解析口做而不是交给下游：
+// 越界值置空比透传更好——自由词会把消费方的分组/门禁碎片化，空值至少诚实。
+var (
+	validCategories = map[string]bool{
+		"bug": true, "security": true, "performance": true, "maintainability": true,
+		"test": true, "style": true, "documentation": true, "other": true,
+	}
+	validSeverities = map[string]bool{
+		"critical": true, "high": true, "medium": true, "low": true,
+	}
+)
+
+func normalizeEnum(v string, valid map[string]bool) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if valid[v] {
+		return v
+	}
+	return ""
 }
