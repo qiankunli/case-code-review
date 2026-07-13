@@ -34,6 +34,11 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 	var patterns []string
 	for _, item := range filePatternsIface {
 		if s, ok := item.(string); ok && s != "" {
+			// 信任边界（docs/reviewer-trust-boundary）：pathspec 带 .. 能让 git grep
+			// 读到仓外内容，reviewer 的只读承诺仅限 repo 内——直接拒绝。
+			if hasTraversalPathComponent(s) {
+				return "Error: file_patterns must not contain ..", nil
+			}
 			patterns = append(patterns, s)
 		}
 	}
@@ -225,4 +230,16 @@ func (p *CodeSearchProvider) insideGitWorkTree(ctx context.Context) bool {
 		out = string(b)
 	}
 	return err == nil && strings.TrimSpace(out) == "true"
+}
+
+// hasTraversalPathComponent reports whether a pathspec contains a `..` path
+// component. git grep resolves pathspecs relative to the repo dir, so `..`
+// escapes the repository — the one thing the read-only reviewer must never do.
+func hasTraversalPathComponent(pathspec string) bool {
+	for _, part := range strings.Split(pathspec, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
