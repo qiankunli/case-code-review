@@ -64,7 +64,11 @@ func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (st
 	if endLine > 0 {
 		requested := int(endLine) - int(startLine) + 1
 		if requested <= 0 {
-			return "", fmt.Errorf("invalid line range: start_line %d is greater than end_line %d", int(startLine), int(endLine))
+			// A reversed range is a model tool-call mistake (same class as a
+			// missing file_path above), not a fatal condition. Return it as a
+			// recoverable observation so the loop feeds it back and the model
+			// can retry with a corrected range, instead of aborting the review.
+			return fmt.Sprintf("Error: invalid line range: start_line %d is greater than end_line %d", int(startLine), int(endLine)), nil
 		}
 		if requested < maxLines {
 			maxLines = requested
