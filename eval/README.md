@@ -177,6 +177,29 @@ uv run python -m reviewbench.run experiments/ccr-vs-ocr.yaml
 - corpus json 入库（`eval/corpus/`）时不带机器路径，repo 用 `--repo` / yaml 指定。
 - 依赖 case-harness（git 源）；replay.py（stdlib-only、debrief 级聚合）保留，两者互补。
 
+### 11. review_team 三臂首轮（2026-07-12，reviewbench 首次全量应用）
+
+hostel 38 PR（含 §5 的跨文件漏报靶子 #9/#10/#11）× base / team / team-bulletin，
+114 solve 全部成功（0 engine 失败）。n=1 run/arm，判方向不判大小：
+
+- **靶子召回**：builder 版本 vs go.mod（当年连续两单漏过）**三臂全中**——7 月初的
+  context 治理已把这类拉进视野，非 team 之功；**健康检查地址 vs 配置家族只有
+  team-bulletin 中**（base/team 均漏）→ 验收①部分中。
+- **精度效应（意外方向）**：team 44 条 vs base 58 条且 judge_precision 0.57 vs 0.44
+  ——board 注入在抑制噪声 finding 而非放大（与"多轮共识降精度"的业界担忧相反）；
+  team-bulletin 43 条 / 0.48 居中。验收② ✓。
+- **post_bulletin 首次真实使用**：203 unit 仅 2 条 observation 上板，但两条质量极高
+  ——跨文件平台一致性怀疑（bwrap_other vs bwrap_linux 返回值分歧）与跨函数锁窗口
+  （§4.3 家族）。频次太低是主要问题；能否转化为接收方 finding 无法单条归因（已知弱点）。
+- **代价（真实且要治）**：unit timeout 24 → 27 → 40（team-bulletin +67%）——板注入
+  加剧 context 压力的嫌疑坐实；dur p50 515→565→600s。注入 token 本身很省
+  （16.6k/19.9k，验收③ ✓），贵在连锁的压缩/超时。
+- **判定**：验收"①或④至少中一个"——①部分中 + finding 结构性变化（④方向性证据），
+  **不止损**；但 v1（cross_check）之前先治 team-bulletin 的 timeout 恶化。
+- 口径：judge=deepseek-v4-pro（与被评同池，自偏好风险未校准）；产物
+  `~/.casecodereview/reviewbench-runs/hostel-team-3arm/`。
+
+
 ## References
 
 - ATIF 导出：`ccr export --format atif <session.jsonl>`（session 落盘位置见 `internal/session/`）
