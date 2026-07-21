@@ -27,6 +27,7 @@ bin/casecodereview
 /casecodereview
 
 /node_modules
+/eval/
 
 # Mac OS X
 .DS_Store
