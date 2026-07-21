@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qiankunli/case-code-review/internal/language"
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
@@ -33,7 +34,7 @@ func TestEnclosingSymbol(t *testing.T) {
 		{"noscope", "", false},                                      // no ::
 	}
 	for _, c := range cases {
-		got, ok := enclosingSymbol(c.id)
+		got, ok := language.EnclosingSymbolID(c.id)
 		if got != c.want || ok != c.ok {
 			t.Errorf("enclosingSymbol(%q) = (%q,%v), want (%q,%v)", c.id, got, ok, c.want, c.ok)
 		}

@@ -6,8 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/qiankunli/case-code-review/internal/callgraph"
+	"github.com/qiankunli/case-code-review/internal/codegraph"
 	"github.com/qiankunli/case-code-review/internal/feature"
+	"github.com/qiankunli/case-code-review/internal/language"
 	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/llmloop"
 	"github.com/qiankunli/case-code-review/internal/msg"
@@ -101,7 +102,7 @@ func (b chainBriefer) materials(u unit.Unit) []material {
 		if c.Relation != unit.RelCaller && c.Relation != unit.RelCallee {
 			continue
 		}
-		path, _, ok := unit.SplitID(c.Ref)
+		path, _, ok := language.SplitSymbolID(c.Ref)
 		if !ok || own[path] || seen[c.Ref] {
 			continue
 		}
@@ -194,7 +195,7 @@ func (a *Agent) renderPieces(ctx context.Context, mats []material) (pieces []pie
 		// bodies as ranged blocks. Span-only materials always take this path;
 		// whole-file fallback additionally needs the ranged_preload gate.
 		if len(m.symbols) > 0 && (!m.whole || a.features.Enabled(feature.RangedPreload)) {
-			if spans := renderSpans(a.args.RepoDir, m, content, lines, &budget); len(spans) > 0 {
+			if spans := renderSpans(ctx, a.sourceAnalyzer(), m, content, lines, &budget); len(spans) > 0 {
 				pieces = append(pieces, spans...)
 				outcomes = append(outcomes, "ranged "+m.path)
 				continue
@@ -243,10 +244,11 @@ func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSourc
 // piece per symbol, mirroring file_read's range output (File header +
 // LINE_RANGE + numbered lines), charging bytes against budget. Returns nil
 // when nothing fit or no symbol resolved to a span.
-func renderSpans(repoDir string, m material, content string, lines []string, budget *int) []piece {
+func renderSpans(ctx context.Context, analyzer *language.Analyzer, m material, content string, lines []string, budget *int) []piece {
 	var out []piece
 	for _, sym := range m.symbols {
-		start, end, ok := unit.SymbolSpanInRepo(repoDir, m.path, content, sym)
+		definition, ok := analyzer.DefinitionByID(ctx, language.Source{Path: m.path, Content: content}, sym)
+		start, end := definition.Span.Start, definition.Span.End
 		if !ok || start < 1 || end > len(lines) {
 			continue
 		}
@@ -353,7 +355,7 @@ func (a *Agent) renderUsageSites(u unit.Unit) (string, int) {
 	for _, p := range u.Paths() {
 		exclude[p] = true
 	}
-	usages := callgraph.FindUsages(a.args.RepoDir, a.args.GitRunner, symbols, exclude)
+	usages := codegraph.FindUsages(a.args.RepoDir, a.args.GitRunner, symbols, exclude)
 	if len(usages) == 0 {
 		return "", 0
 	}

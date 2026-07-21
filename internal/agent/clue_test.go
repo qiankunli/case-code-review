@@ -16,7 +16,7 @@ func TestSplitUnits_CostlyFindersGatedByBudget(t *testing.T) {
 	// Below the watermark: units stay fine-grained → costly finder runs per unit.
 	var under int
 	au := &Agent{
-		splitter:      unit.GoFuncSplitter{},
+		splitter:      unit.AutoSplitter{},
 		diffs:         []model.Diff{goDiff("p.go", 3)},
 		costlyFinders: []unit.ClueFinder{countingFinder{&under}},
 	}
@@ -30,7 +30,7 @@ func TestSplitUnits_CostlyFindersGatedByBudget(t *testing.T) {
 	// Above the watermark: units will coalesce → costly finder skipped entirely.
 	var over int
 	ao := &Agent{
-		splitter:      unit.GoFuncSplitter{},
+		splitter:      unit.AutoSplitter{},
 		diffs:         []model.Diff{goDiff("p.go", defaultUnitWatermark+2)},
 		costlyFinders: []unit.ClueFinder{countingFinder{&over}},
 	}

@@ -3,13 +3,14 @@ package agent
 import (
 	"testing"
 
+	"github.com/qiankunli/case-code-review/internal/language"
 	"github.com/qiankunli/case-code-review/internal/model"
 )
 
 func TestTagSymbolIDs(t *testing.T) {
 	// Foo spans lines 3-5; a comment on line 4 resolves to svc.go::Foo.
 	src := "package p\n\nfunc Foo() error {\n\treturn doX()\n}\n"
-	a := &Agent{diffs: []model.Diff{{NewPath: "svc.go", NewFileContent: src}}}
+	a := &Agent{diffs: []model.Diff{{NewPath: "svc.go", NewFileContent: src}}, analyzer: language.NewAnalyzer("")}
 
 	comments := []model.LlmComment{
 		{Path: "svc.go", StartLine: 4},   // inside Foo -> tagged

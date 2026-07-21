@@ -1,13 +1,11 @@
 package spec
 
 import (
-	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strings"
 
+	"github.com/qiankunli/case-code-review/internal/language"
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
@@ -16,10 +14,6 @@ import (
 // (cluesFor: symbol → authored marks + derived docstring). RelatedFinder composes
 // the two into one unit.ClueFinder, so adding a relation or a source never
 // multiplies finder types.
-
-// identifier matches a source identifier (Go/Python/JavaScript-family); used to scan a Unit's diff
-// for names it references.
-var identifier = regexp.MustCompile(`[A-Za-z_$][A-Za-z0-9_$]*`)
 
 // RelatedSymbol is one symbol reached from a review unit along a typed relation —
 // what the relation axis hands to the source axis.
@@ -49,8 +43,8 @@ func (selfCollector) Related(u unit.Unit) []RelatedSymbol {
 	var out []RelatedSymbol
 	for _, sym := range u.AllSymbols() {
 		name := sym
-		if _, after, ok := strings.Cut(sym, "::"); ok {
-			name = after
+		if parsed, ok := language.SymbolName(sym); ok {
+			name = parsed
 		}
 		out = append(out, RelatedSymbol{ID: sym, Relation: unit.RelSelf, Name: name})
 	}
@@ -72,42 +66,20 @@ func (c ownerCollector) Related(u unit.Unit) []RelatedSymbol {
 	seen := map[string]bool{}
 	var out []RelatedSymbol
 	for _, sym := range u.AllSymbols() {
-		owner, ok := enclosingSymbol(sym)
+		owner, ok := language.EnclosingSymbolID(sym)
 		if !ok || own[owner] || seen[owner] {
 			continue // no owner, or the owner is itself a changed symbol (self covers it)
 		}
 		seen[owner] = true
-		rs := RelatedSymbol{ID: owner, Relation: unit.RelOwner, Name: ownerName(owner), Ref: owner}
-		if rel, name, ok := strings.Cut(owner, "::"); ok && c.repoDir != "" {
+		name, _ := language.SymbolName(owner)
+		rs := RelatedSymbol{ID: owner, Relation: unit.RelOwner, Name: name, Ref: owner}
+		if rel, name, ok := language.SplitSymbolID(owner); ok && c.repoDir != "" {
 			rs.DocFile = filepath.Join(c.repoDir, rel)
 			rs.DocName = name
 		}
 		out = append(out, rs)
 	}
 	return out
-}
-
-// enclosingSymbol returns the symbol-id of id's immediate enclosing symbol
-// (`<relpath>::Base.method` → `<relpath>::Base`), or false when the symbol part
-// has no dot (a top-level func/type — no owner).
-func enclosingSymbol(id string) (string, bool) {
-	rel, sym, ok := strings.Cut(id, "::")
-	if !ok {
-		return "", false
-	}
-	i := strings.LastIndex(sym, ".")
-	if i < 0 {
-		return "", false
-	}
-	return rel + "::" + sym[:i], true
-}
-
-// ownerName is the bare symbol name of an enclosing symbol-id (for labelling).
-func ownerName(ownerID string) string {
-	if _, sym, ok := strings.Cut(ownerID, "::"); ok {
-		return sym
-	}
-	return ownerID
 }
 
 // --- used: types/funcs the diff references (callee ⊇ class) ---
@@ -122,9 +94,10 @@ func ownerName(ownerID string) string {
 // carries its source file, so its docstring is available even when it has no
 // spec entry (adoption-free).
 type usedCollector struct {
-	byName  map[string][]string // bare symbol name -> local symbol-ids (non-method only)
-	byFqn   map[string]fqnHit   // fqn -> resolved entry (local entries win over deps)
-	repoDir string
+	byName   map[string][]string // bare symbol name -> local symbol-ids (non-method only)
+	byFqn    map[string]fqnHit   // fqn -> resolved entry (local entries win over deps)
+	repoDir  string
+	analyzer *language.Analyzer
 }
 
 // fqnHit is one fqn-resolved entry; id is "" for a dependency entry (no local
@@ -154,16 +127,13 @@ func newUsedCollector(cat Catalog, repoDir string) usedCollector {
 		if e.Fqn != "" {
 			byFqn[e.Fqn] = fqnHit{id: id, entry: e}
 		}
-		sym := id
-		if _, after, ok := strings.Cut(id, "::"); ok {
-			sym = after
-		}
-		if strings.Contains(sym, ".") {
+		sym, _ := language.SymbolName(id)
+		if _, ok := language.EnclosingSymbolID(id); ok {
 			continue // a method (Class.method) isn't referenced by a bare name
 		}
 		byName[sym] = append(byName[sym], id)
 	}
-	return usedCollector{byName: byName, byFqn: byFqn, repoDir: repoDir}
+	return usedCollector{byName: byName, byFqn: byFqn, repoDir: repoDir, analyzer: language.NewAnalyzer(repoDir)}
 }
 
 func (c usedCollector) Related(u unit.Unit) []RelatedSymbol {
@@ -171,7 +141,6 @@ func (c usedCollector) Related(u unit.Unit) []RelatedSymbol {
 	for _, s := range u.AllSymbols() {
 		own[s] = true
 	}
-	diff := u.Diff()
 	var out []RelatedSymbol
 	emitted := map[string]bool{}
 	emit := func(rs RelatedSymbol) {
@@ -185,92 +154,47 @@ func (c usedCollector) Related(u unit.Unit) []RelatedSymbol {
 		emitted[key] = true
 		out = append(out, rs)
 	}
-	resolved := map[string]bool{} // names resolved precisely — skip their bare-name fallback
+	var references []language.Reference
+	for _, fragment := range u.Fragments {
+		source := language.Source{Path: fragment.Path}
+		if c.repoDir != "" {
+			if content, err := os.ReadFile(filepath.Join(c.repoDir, fragment.Path)); err == nil {
+				source.Content = string(content)
+			}
+		}
+		references = append(references, c.analyzer.ReferencesIn(source, fragment.Diff)...)
+	}
 
-	// Go: `pkg.Symbol` selectors → importpath.Symbol fqn.
-	if goImp := c.goImportPaths(u); len(goImp) > 0 {
-		for _, m := range goSelector.FindAllStringSubmatch(diff, -1) {
-			pkg, sym := m[1], m[2]
-			path, ok := goImp[pkg]
-			if !ok {
-				continue
-			}
-			fqn := path + "." + sym
-			hit, ok := c.byFqn[fqn]
-			if !ok {
-				continue
-			}
-			rs := RelatedSymbol{ID: hit.id, Relation: unit.RelUsed, Name: sym, Ref: fqn, Entry: &hit.entry}
-			// doc when the resolved entry is local, so its relpath is this repo's (a
-			// dependency's doc would need module-cache resolution — not yet).
-			if rel, dn, ok := strings.Cut(hit.id, "::"); ok && c.repoDir != "" {
-				if p := filepath.Join(c.repoDir, rel); fileExists(p) {
-					rs.DocFile, rs.DocName = p, dn
+	resolved := map[string]bool{} // names resolved precisely — skip their bare-name fallback
+	for _, reference := range references {
+		if reference.FQN == "" {
+			continue
+		}
+		rs := RelatedSymbol{
+			Relation: unit.RelUsed, Name: reference.Name, Ref: reference.FQN,
+			DocFile: reference.SourcePath, DocName: reference.SourceName,
+		}
+		if hit, ok := c.byFqn[reference.FQN]; ok {
+			rs.ID, rs.Entry = hit.id, &hit.entry
+			if rs.DocFile == "" && hit.id != "" && c.repoDir != "" {
+				if rel, name, ok := language.SplitSymbolID(hit.id); ok {
+					rs.DocFile, rs.DocName = filepath.Join(c.repoDir, rel), name
 				}
 			}
 			emit(rs)
-			resolved[sym] = true
-		}
-	}
-
-	// Python: `from mod import Name` resolves a bare name to fqn; bare-name fallback.
-	pyImp := c.pyImports(u)
-	roots := pyModuleRoots(c.repoDir)
-	for _, name := range identifier.FindAllString(diff, -1) {
-		if resolved[name] {
+			resolved[reference.Name] = true
 			continue
 		}
-		if sym, ok := pyImp[name]; ok {
-			fqn := sym.module + "." + sym.name
-			rs := RelatedSymbol{Relation: unit.RelUsed, Name: name, Ref: fqn}
-			if file, ok := resolvePyModuleFile(sym.module, roots); ok {
-				rs.DocFile, rs.DocName = file, sym.name
-			}
-			if hit, ok := c.byFqn[fqn]; ok {
-				rs.ID, rs.Entry = hit.id, &hit.entry
-				emit(rs)
-				continue // resolved precisely — skip bare-name (avoids same-name mismatch)
-			}
-			if rs.DocFile != "" {
-				emit(rs) // unindexed but resolvable source: docstring-only (adoption-free)
-			}
-		}
-		for _, id := range c.byName[name] {
-			emit(RelatedSymbol{ID: id, Relation: unit.RelUsed, Name: name, Ref: name})
+		if rs.DocFile != "" {
+			emit(rs) // resolvable source without a spec entry: docstring-only
 		}
 	}
-	return out
-}
-
-// pyImports maps the unit's Python member-file from-imports: local name -> source.
-func (c usedCollector) pyImports(u unit.Unit) map[string]importedSym {
-	if c.repoDir == "" {
-		return nil
-	}
-	out := map[string]importedSym{}
-	for _, p := range u.Paths() {
-		if !strings.HasSuffix(p, ".py") {
+	for _, reference := range references {
+		if reference.FQN != "" || resolved[reference.Name] {
 			continue
 		}
-		if src, err := os.ReadFile(filepath.Join(c.repoDir, p)); err == nil {
-			maps.Copy(out, parsePyFromImports(string(src)))
-		} // best-effort: an unreadable member just skips its imports
-	}
-	return out
-}
-
-// goImportPaths maps the unit's Go member-file import selector names to import paths.
-func (c usedCollector) goImportPaths(u unit.Unit) map[string]string {
-	if c.repoDir == "" {
-		return nil
-	}
-	out := map[string]string{}
-	for _, p := range u.Paths() {
-		if !strings.HasSuffix(p, ".go") {
-			continue
-		}
-		if src, err := os.ReadFile(filepath.Join(c.repoDir, p)); err == nil {
-			maps.Copy(out, parseGoImports(string(src)))
+		for _, id := range c.byName[reference.Name] {
+			emit(RelatedSymbol{ID: id, Relation: unit.RelUsed, Name: reference.Name, Ref: reference.Name})
 		}
 	}
 	return out
@@ -381,7 +305,7 @@ func linkClues(links []string, rel unit.Relation) []unit.Clue {
 	var out []unit.Clue
 	for _, l := range links {
 		kind := "doc"
-		if strings.Contains(l, "::") {
+		if _, _, ok := language.SplitSymbolID(l); ok {
 			kind = "function"
 		}
 		out = append(out, unit.Clue{Kind: unit.ClueLink, Relation: rel, Text: l + " (" + kind + ")", Ref: l})
