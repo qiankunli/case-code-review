@@ -8,27 +8,41 @@ import (
 )
 
 // FuncIDAt resolves a 1-indexed line to its enclosing function's symbol-id,
-// dispatching by file extension (.go via go/ast, .py via python3). Returns
-// ("", false) for unsupported languages or on any parse failure. This is the
-// language-agnostic entry the call-graph finders use.
+// dispatching by file extension. Returns ("", false) for unsupported languages
+// or on any parse failure. This is the language-agnostic entry the call-graph
+// finders use.
 func FuncIDAt(path, src string, line int) (string, bool) {
+	return FuncIDAtInRepo("", path, src, line)
+}
+
+// FuncIDAtInRepo is FuncIDAt with an explicit repository root for language
+// parsers that resolve project-local tooling.
+func FuncIDAtInRepo(repoDir, path, src string, line int) (string, bool) {
 	switch {
 	case strings.HasSuffix(path, ".go"):
 		return GoFuncIDAt(path, src, line)
 	case strings.HasSuffix(path, ".py"):
 		return PyFuncIDAt(path, src, line)
+	case isTSPath(path):
+		return TSFuncIDAtInRepo(repoDir, path, src, line)
 	default:
 		return "", false
 	}
 }
 
 // SymbolSpan returns the 1-indexed inclusive line range of a symbol-id's
-// definition in src, dispatching by file extension (.go via go/ast, .py via
-// python3). The briefing uses it to inline just a function's body when the
+// definition in src, dispatching by file extension. The briefing uses it to
+// inline just a function's body when the
 // whole file can't be (over budget, or a neighbor where only one function
 // matters). Returns (0, 0, false) for unsupported languages, parse failures,
 // or a symbol not defined in src.
 func SymbolSpan(path, src, symbolID string) (start, end int, ok bool) {
+	return SymbolSpanInRepo("", path, src, symbolID)
+}
+
+// SymbolSpanInRepo is SymbolSpan with an explicit repository root for
+// project-local parsers.
+func SymbolSpanInRepo(repoDir, path, src, symbolID string) (start, end int, ok bool) {
 	var spans []funcSpan
 	var err error
 	switch {
@@ -36,6 +50,8 @@ func SymbolSpan(path, src, symbolID string) (start, end int, ok bool) {
 		spans, err = parseGoFuncs(path, src)
 	case strings.HasSuffix(path, ".py"):
 		spans, err = parsePyFuncs(path, src)
+	case isTSPath(path):
+		spans, err = parseTSFuncsInRepo(repoDir, path, src)
 	default:
 		return 0, 0, false
 	}
@@ -54,11 +70,19 @@ func SymbolSpan(path, src, symbolID string) (start, end int, ok bool) {
 // identified by symbol, dispatching by file extension. Returns nil for
 // unsupported languages or on any parse failure.
 func CalleesOf(path, src, symbol string) []string {
+	return CalleesOfInRepo("", path, src, symbol)
+}
+
+// CalleesOfInRepo is CalleesOf with an explicit repository root for
+// project-local parsers.
+func CalleesOfInRepo(repoDir, path, src, symbol string) []string {
 	switch {
 	case strings.HasSuffix(path, ".go"):
 		return GoCalleesOf(path, src, symbol)
 	case strings.HasSuffix(path, ".py"):
 		return PyCalleesOf(path, src, symbol)
+	case isTSPath(path):
+		return TSCalleesOfInRepo(repoDir, path, src, symbol)
 	default:
 		return nil
 	}

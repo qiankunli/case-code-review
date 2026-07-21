@@ -50,7 +50,7 @@ func FindUsages(repoDir string, runner *gitcmd.Runner, symbolIDs []string, exclu
 		scope := unexportedScope(path, name)
 		perSym := 0
 		// Over-fetch: exclusions (own files, dupes) eat into the raw hit list.
-		for _, h := range grepGo(repoDir, runner, []string{"-w", "-e", name}, usagePerSymbolMax*4, scope) {
+		for _, h := range grepCode(repoDir, runner, []string{"-F", "-w", "-e", name}, usagePerSymbolMax*4, scope) {
 			if excludePaths[h.file] || isCommentLine(h.text) {
 				continue
 			}

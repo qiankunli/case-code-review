@@ -26,12 +26,12 @@ type hit struct {
 	text string // the matched line's content (usage-site rendering; ignored by callers that only resolve)
 }
 
-// grepGo runs `git grep` over the repo's Go/Python files with the given match
+// grepCode runs `git grep` over the repo's function-aware source files with the given match
 // args (e.g. ["-w", "-e", name] for a word match, or ["-P", "-e", pattern] for a
 // regex) and returns up to maxHits file:line hits. When scopeDir is non-empty the
 // grep is restricted to that single package directory (see scopePathspecs).
 // Returns nil on any error so finders degrade silently.
-func grepGo(repoDir string, runner *gitcmd.Runner, matchArgs []string, maxHits int, scopeDir string) []hit {
+func grepCode(repoDir string, runner *gitcmd.Runner, matchArgs []string, maxHits int, scopeDir string) []hit {
 	ctx, cancel := context.WithTimeout(context.Background(), grepTimeout)
 	defer cancel()
 
@@ -72,11 +72,11 @@ func grepGo(repoDir string, runner *gitcmd.Runner, matchArgs []string, maxHits i
 func scopePathspecs(scopeDir string) []string {
 	switch scopeDir {
 	case "":
-		return []string{"*.go", "*.py"}
+		return []string{"*.go", "*.py", "*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs"}
 	case ".":
-		return []string{":(glob)*.go", ":(glob)*.py"}
+		return []string{":(glob)*.go", ":(glob)*.py", ":(glob)*.ts", ":(glob)*.tsx", ":(glob)*.js", ":(glob)*.jsx", ":(glob)*.mjs", ":(glob)*.cjs"}
 	default:
-		return []string{":(glob)" + scopeDir + "/*.go", ":(glob)" + scopeDir + "/*.py"}
+		return []string{":(glob)" + scopeDir + "/*.go", ":(glob)" + scopeDir + "/*.py", ":(glob)" + scopeDir + "/*.ts", ":(glob)" + scopeDir + "/*.tsx", ":(glob)" + scopeDir + "/*.js", ":(glob)" + scopeDir + "/*.jsx", ":(glob)" + scopeDir + "/*.mjs", ":(glob)" + scopeDir + "/*.cjs"}
 	}
 }
 
@@ -112,11 +112,11 @@ func gitOutput(ctx context.Context, repoDir string, runner *gitcmd.Runner, args 
 }
 
 // funcIDAt reads the hit's file (under repoDir) and resolves the line to the
-// symbol-id of its enclosing function — dispatched by extension (Go / Python).
+// symbol-id of its enclosing function — dispatched by extension.
 func funcIDAt(repoDir string, h hit) (string, bool) {
 	src, err := os.ReadFile(filepath.Join(repoDir, h.file))
 	if err != nil {
 		return "", false
 	}
-	return unit.FuncIDAt(h.file, string(src), h.line)
+	return unit.FuncIDAtInRepo(repoDir, h.file, string(src), h.line)
 }
