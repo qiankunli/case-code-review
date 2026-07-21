@@ -31,34 +31,16 @@ import (
 	"sync"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/qiankunli/case-code-review/internal/language"
 )
-
-//go:embed supported_file_types.json
-var defaultData []byte
 
 //go:embed default_exclude_patterns.json
 var excludeData []byte
 
 var (
-	supported map[string]bool
-	initOnce  sync.Once
-)
-
-var (
 	excludePatterns []string // raw patterns from JSON (may contain {a,b} syntax)
 	excludeOnce     sync.Once
 )
-
-func initMap() {
-	var exts []string
-	if err := json.Unmarshal(defaultData, &exts); err != nil {
-		panic("allowedext: failed to parse supported_file_types.json: " + err.Error())
-	}
-	supported = make(map[string]bool, len(exts))
-	for _, e := range exts {
-		supported[strings.ToLower(e)] = true
-	}
-}
 
 func initExclude() {
 	if err := json.Unmarshal(excludeData, &excludePatterns); err != nil {
@@ -72,8 +54,7 @@ func initExclude() {
 // IsAllowedExt returns true when the given file extension is in the supported types list.
 // The check is case-insensitive.
 func IsAllowedExt(ext string) bool {
-	initOnce.Do(initMap)
-	return supported[strings.ToLower(ext)]
+	return language.IsReviewableExtension(ext)
 }
 
 // IsExcludedPath returns true when the given file path matches any default exclude pattern.

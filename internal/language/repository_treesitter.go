@@ -44,6 +44,9 @@ func scanTreeSitterRepository(repoDir string) *RepositoryIndex {
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
+		if !IsReviewableExtension(strings.ToLower(filepath.Ext(rel))) || fileScopeExtensions[strings.ToLower(filepath.Ext(rel))] {
+			return nil
+		}
 		language, ok := Detect(rel)
 		if !ok || language == Go || language == Python || isRepositoryTestFile(name) {
 			return nil
@@ -56,11 +59,14 @@ func scanTreeSitterRepository(repoDir string) *RepositoryIndex {
 		if err != nil {
 			return nil
 		}
-		count++
 		analysis, err := analyzeTreeSitter(ctx, language, Source{Path: rel, Content: string(content)})
 		if err != nil {
 			return nil
 		}
+		if len(analysis.Definitions) == 0 && len(analysis.References) == 0 {
+			return nil
+		}
+		count++
 		for _, definition := range analysis.Definitions {
 			index.Definitions[rel] = append(index.Definitions[rel], IndexedDefinition{
 				Name: definition.Name, SymbolID: definition.SymbolID, Path: rel,

@@ -4,11 +4,28 @@
 package language
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/odvcencio/gotreesitter/grammars"
 )
+
+// Some extensions are inherently ambiguous. ccr's review allowlist gives
+// these suffixes a product-level meaning, so do not inherit registry order.
+var preferredGrammarByExtension = map[string]string{
+	".fs": "fsharp",
+	".m":  "objc",
+}
+
+// Data and markup files remain reviewable at file scope, but should not enter
+// function-oriented repository scans or callgraph grep pathspecs.
+var fileScopeExtensions = map[string]bool{
+	".css": true, ".scss": true, ".sass": true, ".less": true,
+	".html": true, ".htm": true, ".xml": true,
+	".yaml": true, ".yml": true, ".json": true, ".json5": true,
+	".toml": true, ".ini": true, ".env": true,
+}
 
 // Language identifies the grammar used to analyze a source file.
 type Language string
@@ -26,6 +43,13 @@ const (
 // source path. Reviewable languages without a backend still degrade to file
 // scope at the unit boundary.
 func Detect(path string) (Language, bool) {
+	extension := strings.ToLower(filepath.Ext(path))
+	if preferred := preferredGrammarByExtension[extension]; preferred != "" {
+		entry := grammars.DetectLanguageByName(preferred)
+		if entry != nil {
+			return Language(entry.Name), true
+		}
+	}
 	entry := grammars.DetectLanguage(path)
 	if entry == nil {
 		return "", false
@@ -37,15 +61,12 @@ func Detect(path string) (Language, bool) {
 // Analyzer. Consumers may use them to bound source discovery without learning
 // which parser implements each language.
 func StructuredExtensions() []string {
-	seen := map[string]bool{}
 	var extensions []string
-	for _, entry := range grammars.AllLanguages() {
-		for _, extension := range entry.Extensions {
-			extension = strings.ToLower(extension)
-			if extension == "" || seen[extension] {
-				continue
-			}
-			seen[extension] = true
+	for _, extension := range ReviewableExtensions() {
+		if fileScopeExtensions[extension] {
+			continue
+		}
+		if _, ok := Detect("source" + extension); ok {
 			extensions = append(extensions, extension)
 		}
 	}

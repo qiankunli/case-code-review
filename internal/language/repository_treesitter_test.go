@@ -60,6 +60,8 @@ export function submit() {
   return true;
 }
 `)
+	write("src/package.json", `{"scripts":{"test":"node --test"}}`)
+	write("src/data.csv", "name,value\nalpha,1\n")
 	return dir
 }
 
@@ -78,6 +80,12 @@ func TestScanTreeSitterRepository_TypeScriptDefsRefsAndSkips(t *testing.T) {
 
 	if _, ok := ex.Definitions["src/service.test.ts"]; ok {
 		t.Error("test files must be skipped")
+	}
+	if _, ok := ex.Definitions["src/package.json"]; ok {
+		t.Error("file-scope data files must not enter the symbol index")
+	}
+	if _, ok := ex.Definitions["src/data.csv"]; ok {
+		t.Error("non-reviewable files must not enter the symbol index")
 	}
 	serviceDefs := ex.Definitions["src/service.ts"]
 	for _, ident := range []string{"Config", "Status", "Service", "Service.run", "handler", "workers.resolve"} {
