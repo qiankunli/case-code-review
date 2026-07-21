@@ -3,19 +3,20 @@ package spec
 import (
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/qiankunli/case-code-review/internal/language"
 )
 
 // SymbolDocstring reads a symbol's docstring from its source file in the repo
 // (adoption-free — no marker needed), given its symbol-id `<relpath>::<name>`:
-// a Python docstring or a Go doc comment, by file extension. "" when the language
-// isn't supported, the file isn't readable, or the symbol has no docstring.
+// a language-native source comment. "" when the language isn't supported, the
+// file isn't readable, or the symbol has no docstring.
 // Shared by the owner/used relations and the callgraph caller/callee walk.
 func SymbolDocstring(repoDir, symbolID string) string {
 	if repoDir == "" {
 		return ""
 	}
-	rel, name, ok := strings.Cut(symbolID, "::")
+	rel, name, ok := language.SplitSymbolID(symbolID)
 	if !ok {
 		return ""
 	}
@@ -29,11 +30,5 @@ func extractDocFromFile(path, name string) string {
 	if err != nil {
 		return ""
 	}
-	switch {
-	case strings.HasSuffix(path, ".py"):
-		return extractPyDocstring(string(src), name)
-	case strings.HasSuffix(path, ".go"):
-		return extractGoDoc(string(src), name)
-	}
-	return ""
+	return language.NewAnalyzer("").Doc(language.Source{Path: path, Content: string(src)}, name)
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qiankunli/case-code-review/internal/callgraph"
+	"github.com/qiankunli/case-code-review/internal/codegraph"
 	"github.com/qiankunli/case-code-review/internal/model"
 	"github.com/qiankunli/case-code-review/internal/spec"
 	"github.com/qiankunli/case-code-review/internal/unit"
@@ -57,7 +57,7 @@ func TestDogfoodContextAssembly(t *testing.T) {
 			spec.NewRelatedFinder(spec.Catalog{Local: idx}, repo, spec.KindGates{Spec: true, Rule: true, Link: true, Doc: true}),
 		},
 		costlyFinders: []unit.ClueFinder{
-			callgraph.CallerFinder{RepoDir: repo, Index: idx, Kinds: spec.KindGates{Spec: true}},
+			codegraph.CallerFinder{RepoDir: repo, Index: idx, Kinds: spec.KindGates{Spec: true}},
 		},
 		diffs: []model.Diff{
 			{NewPath: "handler.go", NewFileContent: files["handler.go"], Insertions: 1, Deletions: 1,

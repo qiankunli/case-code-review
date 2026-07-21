@@ -3,6 +3,7 @@ package unit
 import (
 	"testing"
 
+	"github.com/qiankunli/case-code-review/internal/language"
 	"github.com/qiankunli/case-code-review/internal/model"
 )
 
@@ -12,7 +13,7 @@ func fileWith(path string, n int) FileFragments {
 	d := model.Diff{NewPath: path, Diff: "@@ -1,1 +1,1 @@\n-a\n+b\n"}
 	var fs []Fragment
 	for range n {
-		id := FuncID(path, "", "f")
+		id := language.SymbolID(path, "", "f")
 		fs = append(fs, Fragment{Path: path, Symbols: []string{id}, Diff: d.Diff})
 	}
 	return FileFragments{Diff: d, Fragments: fs}

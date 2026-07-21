@@ -10,7 +10,7 @@ import (
 )
 
 // goDiff builds a model.Diff for a Go file of n trivial functions (f0..f{n-1})
-// with a one-line change in each, so GoFuncSplitter yields n function Units.
+// with a one-line change in each, so AutoSplitter yields n function Units.
 func goDiff(path string, n int) model.Diff {
 	var s strings.Builder
 	s.WriteString("package p\n\n")
@@ -28,7 +28,7 @@ func goDiff(path string, n int) model.Diff {
 
 func splitWith(t *testing.T, diffs ...model.Diff) []unit.Unit {
 	t.Helper()
-	a := &Agent{splitter: unit.GoFuncSplitter{}, diffs: diffs}
+	a := &Agent{splitter: unit.AutoSplitter{}, diffs: diffs}
 	units, err := a.splitUnits()
 	if err != nil {
 		t.Fatal(err)

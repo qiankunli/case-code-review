@@ -13,6 +13,7 @@ package unit
 import (
 	"strings"
 
+	"github.com/qiankunli/case-code-review/internal/language"
 	"github.com/qiankunli/case-code-review/internal/model"
 	"github.com/qiankunli/go-stdx/slicesx"
 )
@@ -197,7 +198,7 @@ func NewChainUnit(frags []Fragment) Unit {
 // symbolName returns the bare symbol from a symbol-id ("p/x.go::Svc.Get" -> "Svc.Get")
 // for building a Unit ID; falls back to the whole string when it isn't an id.
 func symbolName(symbolID string) string {
-	if _, sym, ok := SplitID(symbolID); ok {
+	if sym, ok := language.SymbolName(symbolID); ok {
 		return sym
 	}
 	return symbolID

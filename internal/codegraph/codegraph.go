@@ -10,12 +10,10 @@
 // carry a Confidence level and consumers filter to what they can stomach —
 // one graph, tiered consumption, instead of per-feature heuristics.
 //
-// The v1 extraction backends are cheap syntax scans producing name-paired
-// reference edges — the lowest confidence tier, acceptable only for ranking.
-// Typed backends (go/types-resolved calls) will tag their edges with an
-// explicit confidence level when they land, together with the consumers
-// that filter on it; the type is deliberately NOT pre-declared here (dead
-// API drifts — see #74 review).
+// Source parsing and language-native facts live in internal/language. This
+// package adapts those facts into graph-backed review features: low-confidence
+// name-paired edges for ranking, and higher-confidence call neighbors for
+// context and unit merging.
 package codegraph
 
 import (

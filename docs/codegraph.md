@@ -1,6 +1,6 @@
-# Codegraph：图基底与分层消费
+# Codegraph：统一图消费层
 
-> `internal/codegraph`（抽取与图）+ `internal/callgraph`（消费与回退）的设计定稿。核心问题：review agent 需要"仓库里有什么、谁连着谁"，但 ccr 的重点**不是**做一个好用的 codegraph——所以这层的每一分复杂度都要有 review 侧的实证痛点背书。
+> `internal/codegraph` 统一承接 language facts 的图用途：repo-map 排名、caller/callee 上下文与 call-chain 邻接。源码事实和解析后端只在 `internal/language`；codegraph 只拥有图算法、成本策略与评审语义。
 
 ## 理念
 
@@ -14,7 +14,7 @@
 | caller 上溯找治理 spec | **契约基线错**——按错的 spec 评审 | 类型消解边 |
 | chain merge 邻接 | **评审作用域被污染**——不相干改动并成一条链 | 类型消解边 |
 
-所以图不必全对就能全用：低置信后端（`goscan.go`/`pyscan.go`/`tsscan.go`，名字配对）只喂排序；高置信后端（`gotypes.go`，go/packages 类型检查）喂 scope 决策。**歧义即弃**是高置信侧的铁律：接口分发调用点不建边、仓外目标丢弃——错误的边比没有边更糟（参考 CodeGraph 项目同款纪律）。
+所以图不必全对就能全用：`internal/language` 的低置信 `RepositoryIndex`（名字配对）只喂排序；Go semantic overlay（go/packages 类型检查）喂 scope 决策。**歧义即弃**是高置信侧的铁律：接口分发调用点不建边、仓外目标丢弃——错误的边比没有边更糟（参考 CodeGraph 项目同款纪律）。
 
 ### 复杂度红线（防"自研 codegraph 内卷"）
 
@@ -25,14 +25,14 @@
 ## 流程
 
 ```
-                    ┌── goscan.go (go/ast) ─────────────┐
-diff 种子           ├── pyscan.go (python3 ast)─────────┤→ Extraction (defs/refs) → Rank(PageRank,
-(文件+符号)          ├── tsscan.go (TypeScript compiler) ┤   diff 种子加权) → BuildMap → {{repo_map}}
-                    └── 未来语言按需 ────────────────────┘
+                    language.ScanRepository
+diff 种子           → RepositoryIndex (definitions/references)
+(文件+符号)          → codegraph adapter → Extraction → Rank(PageRank,
+                                              diff 种子加权) → BuildMap → {{repo_map}}
                                                                               (每 unit prompt)
-                    gotypes.go (go/packages + TypesInfo)
+                    language Go semantic overlay (go/packages + TypesInfo)
                         → CallGraph（类型消解直接调用边，test 文件除外）
-                        → callgraph.TypedGraph（懒构建、每 review 一次、60s 超时）
+                        → codegraph.TypedGraph（懒构建、每 review 一次、60s 超时）
                               ├→ CallerFinder/CalleeFinder（clue：spec 上溯 / 依赖契约）
                               └→ CallAdjacency（merge：chain 邻接）
                           （非 Go 符号 / 构建失败 → ok=false → 原 grep 启发式兜底）

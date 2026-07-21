@@ -6,47 +6,6 @@ import (
 	"testing"
 )
 
-func TestParseGoRequires(t *testing.T) {
-	gomod := `module github.com/org/app
-
-go 1.25
-
-require github.com/org/framework v1.2.3
-
-require (
-	github.com/a/b v0.1.0 // indirect
-	github.com/c/d v2.0.0
-)
-`
-	got := parseGoRequires(gomod)
-	want := map[string]string{
-		"github.com/org/framework": "v1.2.3",
-		"github.com/a/b":           "v0.1.0",
-		"github.com/c/d":           "v2.0.0",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("got %v", got)
-	}
-	for k, v := range want {
-		if got[k] != v {
-			t.Errorf("%s = %q, want %q", k, got[k], v)
-		}
-	}
-}
-
-func TestEscapeModulePath(t *testing.T) {
-	cases := map[string]string{
-		"github.com/org/framework":   "github.com/org/framework",
-		"github.com/Org/Framework":   "github.com/!org/!framework",
-		"github.com/BurntSushi/toml": "github.com/!burnt!sushi/toml",
-	}
-	for in, want := range cases {
-		if got := escapeModulePath(in); got != want {
-			t.Errorf("escape(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestLoadDepSpecs_GoModCache(t *testing.T) {
 	repo := t.TempDir()
 	cache := t.TempDir()

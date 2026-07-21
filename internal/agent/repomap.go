@@ -2,10 +2,10 @@ package agent
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/codegraph"
+	"github.com/qiankunli/case-code-review/internal/language"
 	"github.com/qiankunli/case-code-review/internal/telemetry"
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
@@ -35,13 +35,13 @@ func (a *Agent) buildRepoMap(units []unit.Unit) string {
 	}
 	for i := range units {
 		for _, sid := range units[i].AllSymbols() {
-			_, sym, ok := unit.SplitID(sid)
+			_, sym, ok := language.SplitSymbolID(sid)
 			if !ok {
 				continue
 			}
 			addIdent(sym) // "Recv.Method" or bare func name
-			if j := strings.LastIndex(sym, "."); j > 0 {
-				addIdent(sym[j+1:]) // bare method name — call sites use this form
+			if bare := language.BareName(sym); bare != sym {
+				addIdent(bare) // bare method name — call sites use this form
 			}
 		}
 	}

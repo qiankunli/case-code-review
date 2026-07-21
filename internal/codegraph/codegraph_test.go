@@ -46,8 +46,8 @@ func Helper() int { return 42 }
 	return dir
 }
 
-func TestScanGo_DefsAndSignatures(t *testing.T) {
-	ex := ScanGo(writeFixture(t))
+func TestScan_DefsAndSignatures(t *testing.T) {
+	ex := Scan(writeFixture(t))
 	defs := ex.Defs["internal/bed/bed.go"]
 	if len(defs) != 3 { // type Manager + 2 methods
 		t.Fatalf("expected 3 defs in bed.go, got %d: %+v", len(defs), defs)
@@ -70,7 +70,7 @@ func TestScanGo_DefsAndSignatures(t *testing.T) {
 }
 
 func TestRank_SeedsPullRelatedSymbolsUp(t *testing.T) {
-	ex := ScanGo(writeFixture(t))
+	ex := Scan(writeFixture(t))
 	PairMethodIdents(ex)
 	// The diff touches web.go and mentions Resolve — bed.go's defs must
 	// outrank the unrelated util.go Helper.
@@ -94,7 +94,7 @@ func TestRank_SeedsPullRelatedSymbolsUp(t *testing.T) {
 }
 
 func TestBuildMap_BudgetAndContent(t *testing.T) {
-	ex := ScanGo(writeFixture(t))
+	ex := Scan(writeFixture(t))
 	PairMethodIdents(ex)
 	m := BuildMap(ex, MapRequest{
 		SeedFiles:  []string{"internal/web/web.go"},
@@ -125,9 +125,9 @@ func TestBuildMap_BudgetAndContent(t *testing.T) {
 func TestBuildMap_Deterministic(t *testing.T) {
 	dir := writeFixture(t)
 	req := MapRequest{SeedFiles: []string{"internal/web/web.go"}, SeedIdents: []string{"Resolve"}}
-	ex1 := ScanGo(dir)
+	ex1 := Scan(dir)
 	PairMethodIdents(ex1)
-	ex2 := ScanGo(dir)
+	ex2 := Scan(dir)
 	PairMethodIdents(ex2)
 	if a, b := BuildMap(ex1, req), BuildMap(ex2, req); a != b {
 		t.Errorf("non-deterministic map:\n--A--\n%s\n--B--\n%s", a, b)

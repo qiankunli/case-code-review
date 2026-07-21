@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/qiankunli/case-code-review/internal/board"
-	"github.com/qiankunli/case-code-review/internal/callgraph"
+	"github.com/qiankunli/case-code-review/internal/codegraph"
 	"github.com/qiankunli/case-code-review/internal/config/rules"
 	"github.com/qiankunli/case-code-review/internal/config/template"
 	"github.com/qiankunli/case-code-review/internal/config/toolsconfig"
@@ -22,6 +22,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/feature"
 	"github.com/qiankunli/case-code-review/internal/gitcmd"
 	"github.com/qiankunli/case-code-review/internal/history"
+	"github.com/qiankunli/case-code-review/internal/language"
 	"github.com/qiankunli/case-code-review/internal/llm"
 	"github.com/qiankunli/case-code-review/internal/llmloop"
 	"github.com/qiankunli/case-code-review/internal/model"
@@ -180,11 +181,23 @@ type Agent struct {
 	// it lists names that actually exist, ranked by relevance to the diff.
 	repoMap string
 	// typedGraph is the shared lazy handle to the typed Go call graph
-	// (nil when the typed_graph gate is off). See callgraph.TypedGraph.
-	typedGraph *callgraph.TypedGraph
+	// (nil when the typed_graph gate is off). See codegraph.TypedGraph.
+	typedGraph *codegraph.TypedGraph
+	// analyzer is the run-scoped source-language boundary shared by splitting,
+	// callgraph lookup, comment tagging, and ranged briefing.
+	analyzer *language.Analyzer
 	// board is the Review Team's shared case board for this run (nil when the
 	// review_team gate is off). See docs/cross-unit.md.
 	board *board.Registry
+}
+
+// sourceAnalyzer preserves the useful zero-value shape of Agent in focused
+// tests while New keeps the production path on one run-scoped cache.
+func (a *Agent) sourceAnalyzer() *language.Analyzer {
+	if a.analyzer != nil {
+		return a.analyzer
+	}
+	return language.NewAnalyzer(a.args.RepoDir)
 }
 
 // New creates a new Agent from the given arguments.
@@ -224,6 +237,7 @@ func New(args Args) *Agent {
 	// the caller_callee COST gate switches the expensive call-graph walk. Relations
 	// themselves are not gated (cheap mechanism). See docs/context-model.md.
 	f := args.Features
+	analyzer := language.NewAnalyzer(args.RepoDir)
 	kinds := spec.KindGates{
 		Spec: f.Enabled(feature.SpecCase),
 		Rule: f.Enabled(feature.Rule),
@@ -237,9 +251,9 @@ func New(args Args) *Agent {
 	// One typed call graph per review, shared by clue finders and merge
 	// adjacency; lazily built on first Go neighbor query. Gate off -> nil
 	// handle -> every consumer stays on the grep heuristics.
-	var typed *callgraph.TypedGraph
+	var typed *codegraph.TypedGraph
 	if f.Enabled(feature.TypedGraph) {
-		typed = &callgraph.TypedGraph{RepoDir: args.RepoDir}
+		typed = &codegraph.TypedGraph{RepoDir: args.RepoDir}
 	}
 	var costlyFinders []unit.ClueFinder
 	// caller/callee sit behind the cost gate (call-graph grep) and emit per the
@@ -250,8 +264,8 @@ func New(args Args) *Agent {
 	// Resolution is intra-repo, hence the local index.
 	if f.Enabled(feature.CallerCallee) && (kinds.Spec || kinds.Doc) {
 		costlyFinders = append(costlyFinders,
-			callgraph.CallerFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Kinds: kinds, Typed: typed},
-			callgraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Kinds: kinds, Typed: typed},
+			codegraph.CallerFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Kinds: kinds, Typed: typed, Analyzer: analyzer},
+			codegraph.CalleeFinder{RepoDir: args.RepoDir, Index: args.Specs.Local, Runner: args.GitRunner, Kinds: kinds, Typed: typed, Analyzer: analyzer},
 		)
 	}
 	a := &Agent{
@@ -261,11 +275,12 @@ func New(args Args) *Agent {
 		// AutoSplitter cuts each file to function-level diff units by language,
 		// degrading to file scope when its parser is unavailable;
 		// WatermarkMerger coalesces them into review units above the watermark.
-		splitter:      unit.AutoSplitter{RepoDir: args.RepoDir},
+		splitter:      unit.AutoSplitter{RepoDir: args.RepoDir, Analyzer: analyzer},
 		merger:        unit.WatermarkMerger{Watermark: defaultUnitWatermark},
 		finders:       finders,       // cheap spec.json / history clues, gated per kind
 		costlyFinders: costlyFinders, // call-graph caller/callee clues (gated + budget-gated)
 		typedGraph:    typed,
+		analyzer:      analyzer,
 	}
 	// Review Team board (docs/cross-unit.md): one shared in-memory board per run
 	// when the gate is on; nil otherwise (loop behavior byte-identical).
@@ -663,8 +678,10 @@ func (a *Agent) tagSymbolIDs(comments []model.LlmComment) {
 		if d == nil || d.NewFileContent == "" {
 			continue
 		}
-		if id, ok := unit.FuncIDAtInRepo(a.args.RepoDir, comments[i].Path, d.NewFileContent, comments[i].StartLine); ok {
-			comments[i].SymbolID = id
+		if definition, ok := a.sourceAnalyzer().DefinitionAt(context.Background(), language.Source{
+			Path: comments[i].Path, Content: d.NewFileContent,
+		}, comments[i].StartLine); ok {
+			comments[i].SymbolID = definition.SymbolID
 		}
 	}
 }
@@ -750,7 +767,7 @@ func (a *Agent) splitUnits() ([]unit.Unit, error) {
 	a.costlyContext = costly // briefing's usage-sites grep rides the same budget gate
 	var units []unit.Unit
 	if costly && a.features.Enabled(feature.CallChain) {
-		adj := callgraph.CallAdjacency(a.args.RepoDir, a.args.GitRunner, a.typedGraph, funcIDsOf(files))
+		adj := codegraph.CallAdjacency(a.args.RepoDir, a.args.GitRunner, a.typedGraph, funcIDsOf(files))
 		chains, residual := clusterByCallChain(files, adj)
 		units = append(units, chains...)
 		units = append(units, merger.Merge(residual)...)
@@ -790,7 +807,7 @@ func unitInterest(u unit.Unit) board.Interest {
 	}
 	for _, ref := range clueRefs(u.Dossier) {
 		in.Symbols[ref] = true
-		if path, _, ok := unit.SplitID(ref); ok {
+		if path, _, ok := language.SplitSymbolID(ref); ok {
 			in.Paths[path] = true
 		}
 	}
@@ -860,8 +877,8 @@ func clueLabel(c unit.Clue) string {
 	switch c.Relation {
 	case unit.RelOwner:
 		name := c.Ref
-		if _, after, ok := strings.Cut(name, "::"); ok {
-			name = after // display the bare type name, not the whole symbol-id
+		if symbol, ok := language.SymbolName(name); ok {
+			name = symbol // display the bare type name, not the whole symbol-id
 		}
 		switch c.Kind {
 		case unit.ClueDoc:
