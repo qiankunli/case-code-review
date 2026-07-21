@@ -10,7 +10,10 @@ import (
 	"github.com/odvcencio/gotreesitter/grammars"
 )
 
-const treeSitterTimeout = 10 * time.Second
+const (
+	treeSitterTimeout           = 10 * time.Second
+	maxTreeSitterSignatureRunes = 240
+)
 
 type treeSitterDefinition struct {
 	Definition
@@ -22,7 +25,7 @@ type treeSitterDefinition struct {
 // higher-fidelity ccr backend. It intentionally returns only the stable facts
 // Analysis exposes; grammar nodes and query captures stop at this boundary.
 func analyzeTreeSitter(ctx context.Context, language Language, source Source) (Analysis, error) {
-	entry := grammars.DetectLanguage(source.Path)
+	entry := grammars.DetectLanguageByName(string(language))
 	if entry == nil {
 		return Analysis{}, fmt.Errorf("%w: %s", ErrUnsupported, source.Path)
 	}
@@ -46,11 +49,15 @@ func analyzeTreeSitter(ctx context.Context, language Language, source Source) (A
 	} else {
 		tree, err = parser.ParseStrict(content)
 	}
+	// Strict parsing may return a partial tree together with a timeout or
+	// cancellation error. Release it even though ccr discards partial facts.
+	if tree != nil {
+		defer tree.Release()
+	}
 	if err != nil {
 		return Analysis{}, fmt.Errorf("parse %s with gotreesitter: %w", source.Path, err)
 	}
-	defer tree.Release()
-	if tree.RootNode() == nil {
+	if tree == nil || tree.RootNode() == nil {
 		return Analysis{}, fmt.Errorf("parse %s with gotreesitter: empty syntax tree", source.Path)
 	}
 
@@ -258,5 +265,10 @@ func treeSitterSignature(content string, startByte, endByte uint32) string {
 	if i := strings.IndexAny(header, "{\n"); i >= 0 {
 		header = header[:i]
 	}
-	return strings.Join(strings.Fields(header), " ")
+	signature := strings.Join(strings.Fields(header), " ")
+	runes := []rune(signature)
+	if len(runes) > maxTreeSitterSignatureRunes {
+		signature = string(runes[:maxTreeSitterSignatureRunes-3]) + "..."
+	}
+	return signature
 }

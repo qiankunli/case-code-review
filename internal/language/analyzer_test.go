@@ -4,7 +4,11 @@ import (
 	"context"
 	"os/exec"
 	"slices"
+	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/odvcencio/gotreesitter/grammars"
 )
 
 func TestAnalyzeGo(t *testing.T) {
@@ -115,6 +119,40 @@ func TestStructuredExtensionsIncludeTreeSitterLanguages(t *testing.T) {
 		if !slices.Contains(extensions, extension) {
 			t.Fatalf("StructuredExtensions missing %q", extension)
 		}
+	}
+	for _, extension := range []string{".json", ".yaml", ".md", ".csv"} {
+		if slices.Contains(extensions, extension) {
+			t.Fatalf("StructuredExtensions includes file-scope suffix %q", extension)
+		}
+	}
+	if len(extensions) >= len(grammars.AllLanguages()) {
+		t.Fatalf("StructuredExtensions should be bounded by ccr's review set, got %d", len(extensions))
+	}
+}
+
+func TestDetectUsesCCRPrecedenceForAmbiguousExtensions(t *testing.T) {
+	tests := []struct {
+		path string
+		want Language
+	}{
+		{path: "Program.fs", want: Language("fsharp")},
+		{path: "Controller.m", want: Language("objc")},
+	}
+	for _, tt := range tests {
+		if got, ok := Detect(tt.path); !ok || got != tt.want {
+			t.Errorf("Detect(%q) = (%q, %v), want (%q, true)", tt.path, got, ok, tt.want)
+		}
+	}
+}
+
+func TestTreeSitterSignatureIsBoundedAndUTF8Safe(t *testing.T) {
+	content := "const render = () => " + strings.Repeat("界", 300)
+	got := treeSitterSignature(content, 0, uint32(len(content)))
+	if !utf8.ValidString(got) {
+		t.Fatalf("signature is not valid UTF-8: %q", got)
+	}
+	if len([]rune(got)) > maxTreeSitterSignatureRunes || !strings.HasSuffix(got, "...") {
+		t.Fatalf("signature length = %d, signature = %q", len([]rune(got)), got)
 	}
 }
 
