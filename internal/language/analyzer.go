@@ -51,10 +51,8 @@ func (a *Analyzer) Analyze(ctx context.Context, source Source) (Analysis, error)
 		analysis, err = analyzeGo(source)
 	case Python:
 		analysis, err = analyzePython(ctx, source)
-	case TypeScript, TSX, JavaScript, JSX:
-		analysis, err = a.analyzeTypeScript(ctx, lang, source)
 	default:
-		return Analysis{}, fmt.Errorf("%w: %s", ErrUnsupported, source.Path)
+		analysis, err = analyzeTreeSitter(ctx, lang, source)
 	}
 	if err != nil {
 		return Analysis{}, err

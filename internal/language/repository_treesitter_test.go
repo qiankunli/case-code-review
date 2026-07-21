@@ -1,9 +1,7 @@
 package language
 
 import (
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -65,20 +63,6 @@ export function submit() {
 	return dir
 }
 
-func requireTypeScriptScan(t *testing.T, dir string) *RepositoryIndex {
-	t.Helper()
-	ex, err := scanTS(dir)
-	var exitErr *exec.ExitError
-	var execErr *exec.Error
-	if errors.As(err, &execErr) || (errors.As(err, &exitErr) && exitErr.ExitCode() == 3) {
-		t.Skip("node and the TypeScript compiler are not available")
-	}
-	if err != nil {
-		t.Fatalf("ScanTS: %v", err)
-	}
-	return ex
-}
-
 func findDef(defs []IndexedDefinition, ident string) *IndexedDefinition {
 	for i := range defs {
 		if defs[i].Name == ident {
@@ -88,9 +72,9 @@ func findDef(defs []IndexedDefinition, ident string) *IndexedDefinition {
 	return nil
 }
 
-func TestScanTypeScriptRepository_DefsRefsAndSkips(t *testing.T) {
+func TestScanTreeSitterRepository_TypeScriptDefsRefsAndSkips(t *testing.T) {
 	dir := writeTSFixture(t)
-	ex := requireTypeScriptScan(t, dir)
+	ex := scanTreeSitterRepository(dir)
 
 	if _, ok := ex.Definitions["src/service.test.ts"]; ok {
 		t.Error("test files must be skipped")
@@ -122,16 +106,16 @@ func TestScanTypeScriptRepository_DefsRefsAndSkips(t *testing.T) {
 	}
 }
 
-func TestScanTypeScriptRepository_MissingCompilerDegrades(t *testing.T) {
+func TestScanTreeSitterRepository_TypeScriptDoesNotNeedNode(t *testing.T) {
 	t.Setenv("PATH", "")
-	if ex := scanTypeScriptRepository(writeTSFixture(t)); ex != nil {
-		t.Fatalf("missing Node should return nil, got %+v", ex)
+	ex := scanTreeSitterRepository(writeTSFixture(t))
+	if findDef(ex.Definitions["src/service.ts"], "Service.run") == nil {
+		t.Fatalf("TypeScript scan should work without Node: %+v", ex.Definitions["src/service.ts"])
 	}
 }
 
 func TestScanRepository_MergesTypeScript(t *testing.T) {
 	dir := writeTSFixture(t)
-	requireTypeScriptScan(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "main.go"),
 		[]byte("package main\n\nfunc Entrypoint() {}\n"), 0o644); err != nil {
 		t.Fatal(err)

@@ -94,7 +94,6 @@ func TestAutoSplitter_RoutesByExtension(t *testing.T) {
 }
 
 func TestAutoSplitter_RoutesTypeScript(t *testing.T) {
-	requireTypeScriptCompiler(t)
 	frags, err := AutoSplitter{}.Split(model.Diff{
 		NewPath:        "app.ts",
 		Diff:           "@@ -2,1 +2,1 @@\n-  return 0;\n+  return 1;\n",

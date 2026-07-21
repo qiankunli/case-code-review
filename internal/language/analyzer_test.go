@@ -3,6 +3,7 @@ package language
 import (
 	"context"
 	"os/exec"
+	"slices"
 	"testing"
 )
 
@@ -54,9 +55,6 @@ class Svc:
 }
 
 func TestAnalyzeTypeScript(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("node not available")
-	}
 	source := Source{Path: "app.ts", Content: `const helper = () => 1;
 
 class Service {
@@ -67,7 +65,7 @@ class Service {
 `}
 	analysis, err := NewAnalyzer("").Analyze(context.Background(), source)
 	if err != nil {
-		t.Skip("TypeScript compiler not available")
+		t.Fatal(err)
 	}
 	assertDefinition(t, analysis, "app.ts::helper", Span{Start: 1, End: 1})
 	assertDefinition(t, analysis, "app.ts::Service.run", Span{Start: 4, End: 6})
@@ -75,8 +73,48 @@ class Service {
 }
 
 func TestAnalyzeUnsupported(t *testing.T) {
-	if _, err := NewAnalyzer("").Analyze(context.Background(), Source{Path: "README.md", Content: "text"}); err == nil {
+	if _, err := NewAnalyzer("").Analyze(context.Background(), Source{Path: "README.unknown-language", Content: "text"}); err == nil {
 		t.Fatal("unsupported source must return an error")
+	}
+}
+
+func TestAnalyzeJavaWithTreeSitter(t *testing.T) {
+	source := Source{Path: "Service.java", Content: `class Service {
+  void run() {
+    validate();
+  }
+}
+`}
+	analysis, err := NewAnalyzer("").Analyze(context.Background(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Language != Language("java") || analysis.Quality != QualityPartial {
+		t.Fatalf("analysis metadata = (%q, %q)", analysis.Language, analysis.Quality)
+	}
+	assertDefinition(t, analysis, "Service.java::Service.run", Span{Start: 2, End: 4})
+	assertNames(t, analysis.CalleesOf("Service.run"), "validate")
+}
+
+func TestAnalyzeRustWithTreeSitterTags(t *testing.T) {
+	source := Source{Path: "lib.rs", Content: `fn run() {
+    validate();
+}
+`}
+	analysis, err := NewAnalyzer("").Analyze(context.Background(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDefinition(t, analysis, "lib.rs::run", Span{Start: 1, End: 3})
+	assertNames(t, analysis.CalleesOf("run"), "validate")
+}
+
+func TestStructuredExtensionsIncludeTreeSitterLanguages(t *testing.T) {
+	extensions := StructuredExtensions()
+	for _, extension := range []string{".go", ".py", ".ts", ".java", ".rs"} {
+		if !slices.Contains(extensions, extension) {
+			t.Fatalf("StructuredExtensions missing %q", extension)
+		}
 	}
 }
 

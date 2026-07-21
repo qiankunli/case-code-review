@@ -1,7 +1,6 @@
 package codegraph
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -9,15 +8,7 @@ import (
 	"github.com/qiankunli/case-code-review/internal/unit"
 )
 
-func requireTypeScriptCompiler(t *testing.T) {
-	t.Helper()
-	if os.Getenv("NODE_PATH") == "" {
-		t.Skip("NODE_PATH does not provide a TypeScript compiler for this test")
-	}
-}
-
 func TestCalleeFinder_TypeScript(t *testing.T) {
-	requireTypeScriptCompiler(t)
 	repo := newRepo(t, map[string]string{
 		"svc.ts":      "export function create() {\n  return validate();\n}\n",
 		"validate.ts": "export function validate() {\n  return true;\n}\n",
@@ -35,7 +26,6 @@ func TestCalleeFinder_TypeScript(t *testing.T) {
 }
 
 func TestCallerFinder_TypeScript(t *testing.T) {
-	requireTypeScriptCompiler(t)
 	repo := newRepo(t, map[string]string{
 		"entry.ts":  "export const handle = () => {\n  return helper();\n};\n",
 		"helper.ts": "export const helper = () => true;\n",
