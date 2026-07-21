@@ -23,7 +23,7 @@
 case-code-review/
 ├── cmd/ccr/        CLI 入口：review/scan/config/… 子命令；组装 Args、加载 spec.json
 └── internal/
-    ├── language/   ★ 唯一源码语言边界：Analyzer / RepositoryIndex 输出 symbol-id、definition/span、call/reference/doc 与依赖根；parser、go/types 与未来 gotreesitter 都封装在内。详见 `docs/language.md`
+    ├── language/   ★ 唯一源码语言边界：Analyzer / RepositoryIndex 输出 symbol-id、definition/span、call/reference/doc 与依赖根；专用 parser、go/types 与 gotreesitter 通用 grammar 都封装在内。详见 `docs/language.md`
     ├── unit/       ★ 两类型两阶段：`Fragment`（原子，Splitter 消费 language facts）→ Merger 归并成 `Unit`（评审作用域，WatermarkMerger）；context 抽象 Clue(kind×relation) / ClueFinder / Dossier（merge 后挂 `Unit.Dossier`，去重后喂 loop）。详见 `docs/unit-model.md` + `docs/context-model.md`
     ├── spec/       ★ 消费 spec.json：SpecFinder/RuleFinder/LinkFinder 把 spec/case/rule/link 找成 Clue（廉价 finder）
     ├── history/    ★ 消费 --history（上轮评审 findings，symbol-id keyed）：Finder 挂成 ClueHistory，渲染成"核验是否已修"的 prompt（廉价 finder；评审反馈闭环的消费侧）
@@ -43,7 +43,7 @@ case-code-review/
 diff ─Splitter─▶ Fragment ─Merger─▶ Unit ─ClueFinder 找 Clue(spec/case/rule/link + caller/callee)─▶ review loop
 ```
 
-> 即：Splitter 把每个文件 diff 切成 `Fragment`（一函数一个 + 残余）→ Merger 归并成 `Unit`（评审作用域）→ 各 ClueFinder **对 Unit** 找 Clue 挂到 `Unit.Clues`（spec/case/rule/link 廉价直查；caller/callee 经 call-graph 上溯/下探，深度 2、Go/Python/TS/JS）→ 一个 Unit 一个 review loop。context 后置（对最终作用域收一次）。
+> 即：Splitter 把每个文件 diff 切成 `Fragment`（一函数一个 + 残余）→ Merger 归并成 `Unit`（评审作用域）→ 各 ClueFinder **对 Unit** 找 Clue 挂到 `Unit.Clues`（spec/case/rule/link 廉价直查；caller/callee 经 call-graph 上溯/下探）→ 一个 Unit 一个 review loop。context 后置（对最终作用域收一次）。
 >
 > **Clue / ClueFinder**：context 抽象的三件——找的动作（`ClueFinder.Find(u Unit) []Clue`，对评审作用域 Unit 找）、找的结果（`Clue{Kind, Text, Ref}`，Text 内联 / Ref 按需指针）、挂哪（`Unit.Clues`，merge 后收）。加一类 context = 加一个 finder，不动主链路。
 

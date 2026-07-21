@@ -1,5 +1,12 @@
 package language
 
+const (
+	// Repository scans are deliberately bounded: a partial map is more useful
+	// than delaying every review on generated or vendored source trees.
+	maxScanFiles = 2000
+	maxFileBytes = 512 * 1024
+)
+
 // IndexedDefinition is the compact definition shape needed by repository-wide
 // name pairing. File analysis carries richer spans and calls; repository scans
 // trade that detail for one bounded pass over the whole tree.
@@ -25,7 +32,7 @@ func ScanRepository(repoDir string) *RepositoryIndex {
 		Definitions: map[string][]IndexedDefinition{},
 		References:  map[string]map[string]int{},
 	}
-	for _, index := range []*RepositoryIndex{scanGoRepository(repoDir), scanPythonRepository(repoDir), scanTypeScriptRepository(repoDir)} {
+	for _, index := range []*RepositoryIndex{scanGoRepository(repoDir), scanPythonRepository(repoDir), scanTreeSitterRepository(repoDir)} {
 		if index == nil {
 			continue
 		}

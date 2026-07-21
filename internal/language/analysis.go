@@ -4,8 +4,10 @@
 package language
 
 import (
-	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/odvcencio/gotreesitter/grammars"
 )
 
 // Language identifies the grammar used to analyze a source file.
@@ -20,41 +22,34 @@ const (
 	JSX        Language = "jsx"
 )
 
-var structuredLanguages = []struct {
-	extension string
-	language  Language
-}{
-	{".go", Go},
-	{".py", Python},
-	{".ts", TypeScript},
-	{".tsx", TSX},
-	{".js", JavaScript},
-	{".jsx", JSX},
-	{".mjs", JavaScript},
-	{".cjs", JavaScript},
-}
-
 // Detect identifies a language with a structured-analysis backend from a
 // source path. Reviewable languages without a backend still degrade to file
 // scope at the unit boundary.
 func Detect(path string) (Language, bool) {
-	extension := strings.ToLower(filepath.Ext(path))
-	for _, candidate := range structuredLanguages {
-		if extension == candidate.extension {
-			return candidate.language, true
-		}
+	entry := grammars.DetectLanguage(path)
+	if entry == nil {
+		return "", false
 	}
-	return "", false
+	return Language(entry.Name), true
 }
 
 // StructuredExtensions returns the source suffixes currently backed by
 // Analyzer. Consumers may use them to bound source discovery without learning
 // which parser implements each language.
 func StructuredExtensions() []string {
-	extensions := make([]string, 0, len(structuredLanguages))
-	for _, candidate := range structuredLanguages {
-		extensions = append(extensions, candidate.extension)
+	seen := map[string]bool{}
+	var extensions []string
+	for _, entry := range grammars.AllLanguages() {
+		for _, extension := range entry.Extensions {
+			extension = strings.ToLower(extension)
+			if extension == "" || seen[extension] {
+				continue
+			}
+			seen[extension] = true
+			extensions = append(extensions, extension)
+		}
 	}
+	sort.Strings(extensions)
 	return extensions
 }
 

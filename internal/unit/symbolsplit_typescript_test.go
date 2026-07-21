@@ -1,28 +1,13 @@
 package unit
 
 import (
-	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/qiankunli/case-code-review/internal/language"
 	"github.com/qiankunli/case-code-review/internal/model"
 )
 
-func requireTypeScriptCompiler(t *testing.T) {
-	t.Helper()
-	if _, err := language.NewAnalyzer("").Analyze(context.Background(), language.Source{
-		Path: "fixture.ts", Content: "const value = 1;\n",
-	}); err != nil {
-		t.Skip("node and the TypeScript compiler are not available")
-	}
-}
-
 func TestAutoSplitter_TypeScriptFunctionMethodAndArrow(t *testing.T) {
-	requireTypeScriptCompiler(t)
 	src := `export function alpha() {
   return helper();
 }
@@ -65,7 +50,7 @@ const View = () => {
 	}
 }
 
-func TestAutoSplitter_TypeScriptFallsBackWithoutCompiler(t *testing.T) {
+func TestAutoSplitter_TypeScriptDoesNotNeedNode(t *testing.T) {
 	t.Setenv("PATH", "")
 	frags, err := AutoSplitter{}.Split(model.Diff{
 		NewPath:        "app.ts",
@@ -75,35 +60,7 @@ func TestAutoSplitter_TypeScriptFallsBackWithoutCompiler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFile {
-		t.Fatalf("missing compiler should fall back to file scope, got %v", ids(frags))
-	}
-}
-
-func TestAutoSplitter_TypeScriptFallsBackWithoutCompilerAPI(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("node not available")
-	}
-	repo := t.TempDir()
-	moduleDir := filepath.Join(repo, "node_modules", "typescript")
-	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// TypeScript 7.0 deliberately ships without the legacy stable Compiler API.
-	// An installed package is therefore not sufficient to promise AST access.
-	if err := os.WriteFile(filepath.Join(moduleDir, "index.js"),
-		[]byte(`module.exports = { version: "7.0.0" };`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	frags, err := (AutoSplitter{RepoDir: repo}).Split(model.Diff{
-		NewPath:        "app.ts",
-		Diff:           "@@ -1,1 +1,1 @@\n-old\n+new\n",
-		NewFileContent: "export function app() { return 1; }",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFile {
-		t.Fatalf("unsupported compiler API should fall back to file scope, got %v", ids(frags))
+	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFunc || frags[0].Symbols[0] != "app.ts::app" {
+		t.Fatalf("TypeScript should use in-process parsing without Node, got %v", ids(frags))
 	}
 }

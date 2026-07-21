@@ -4,9 +4,9 @@
 
 `internal/language` 是 ccr 唯一的源码语言边界。它把不同解析后端收敛成稳定的语言事实：语言、symbol-id、definition/span、call、reference、doc、依赖根与质量等级。`unit`、`codegraph` 消费这些事实，不感知 AST、query capture、编译器进程或 grammar。
 
-这个边界解决的不是“少写几个 switch”，而是让解析技术可以独立演进：当前后端与未来 gotreesitter 都只能在该包内替换，使用方不增加 backend flag，也不按语言分支。
+这个边界解决的不是“少写几个 switch”，而是让解析技术可以独立演进：各语言专用后端与 gotreesitter 通用后端都只能在该包内替换，使用方不增加 backend flag，也不按语言分支。
 
-当前结构化后端覆盖 Go、Python、TypeScript/JavaScript；allowlist 中的其它语言仍可评审，但在对应后端落地前保持 file-scope 降级。
+Go、Python 暂由原有专用后端提供事实；TypeScript/JavaScript 已迁到 gotreesitter，并在通用 grammar 之上保留命名箭头函数、对象方法和 namespace owner 等语言适配。其它 grammar 先走通用后端，保守地产出 definitions、calls 与 references。通用后端拿不到可靠结构时仍回到 file-scope，不用猜测补齐。
 
 ## 流程
 
@@ -41,3 +41,9 @@ Go repository ──semantic overlay──▶ resolved CallGraph ──▶ codeg
 公开事实模型不暴露 parser tree/node、gotreesitter query capture 或语言编译器对象。生产代码中的解析器依赖由边界测试限制在 `internal/language`；未来新增语言应增加 grammar/query 与契约 fixture，而不是在消费包新增 AST walker。
 
 同样，扩展名集合、symbol owner/bare-name、语言可见性、定义搜索语法、注释、import/reference 解析与依赖根发现都属于这个边界。消费方可以决定读取什么资产、如何 grep、排名或生成 clue，但不能自行解释源码语言或生态布局。
+
+### gotreesitter 先兜底，再逐门替换
+
+通用 grammar registry 让新增语言先获得函数级 unit，而不是等待一套专用 AST 实现。已有高保真后端不一次性推倒：每门语言先用同一批 fixture 对齐 symbol-id、span、call、reference 和降级行为，再切换实现；TypeScript/JavaScript 是首个完成迁移的语言族，解析已在进程内完成，不再依赖项目的 Node 或 TypeScript compiler。Go 的 `go/types` 语义图继续作为 syntax facts 之上的独立增强层。
+
+ccr 使用完整 grammar registry 并按文件懒加载 grammar。这样普通构建和 `go install` 不依赖特殊 build tags，也与“支持的语言持续扩展”一致；代价是发布二进制包含 grammar blobs，体积预算应随依赖升级一并复核。

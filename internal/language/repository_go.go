@@ -12,16 +12,6 @@ import (
 // occurrence counts. No type checking — the edges it feeds are
 // ConfidenceLow by construction, which the ranking consumer tolerates.
 
-const (
-	// maxScanFiles bounds the sweep on huge repos: the map degrades (fewer
-	// files ranked) instead of the build stalling. Files are walked in
-	// deterministic (sorted) order so the truncation is stable.
-	maxScanFiles = 2000
-	// maxFileBytes skips generated/vendored monsters that would dominate
-	// both parse time and ref counts.
-	maxFileBytes = 512 * 1024
-)
-
 // scanGoRepository extracts defs/refs from all non-test .go files under repoDir.
 // Vendor trees, hidden dirs and testdata are skipped. Best-effort: files
 // that fail to parse are ignored.
