@@ -3,7 +3,8 @@
 // walking up to its callers; CalleeFinder surfaces the contracts the function
 // DEPENDS ON by walking down to its callees. Both share one bounded walk
 // (walkForSpecs) and differ only in their neighbor function. They are
-// deliberately lightweight (git grep + go/ast, no whole-repo type checking) so
+// deliberately lightweight (git grep + per-language parsers, with an optional
+// typed Go graph) so
 // they work on a diff that may not even compile, and degrade to nothing whenever
 // they can't help.
 package callgraph
@@ -96,7 +97,7 @@ func (f CallerFinder) callers(funcID string) []string {
 	scope := unexportedScope(path, name)
 	var ids []string
 	seen := map[string]bool{}
-	for _, h := range grepGo(f.RepoDir, f.Runner, []string{"-w", "-e", name}, defaultMaxResults*4, scope) {
+	for _, h := range grepCode(f.RepoDir, f.Runner, []string{"-F", "-w", "-e", name}, defaultMaxResults*4, scope) {
 		id, ok := funcIDAt(f.RepoDir, h)
 		if !ok || id == funcID || seen[id] { // skip funcID's own definition / recursion / dupes
 			continue

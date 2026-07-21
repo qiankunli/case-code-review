@@ -258,10 +258,10 @@ func New(args Args) *Agent {
 		args:     args,
 		session:  args.Session,
 		features: f,
-		// AutoSplitter cuts each file to function-level diff units by language (Go
-		// via go/ast, Python via python3), degrading to file scope otherwise;
+		// AutoSplitter cuts each file to function-level diff units by language,
+		// degrading to file scope when its parser is unavailable;
 		// WatermarkMerger coalesces them into review units above the watermark.
-		splitter:      unit.AutoSplitter{},
+		splitter:      unit.AutoSplitter{RepoDir: args.RepoDir},
 		merger:        unit.WatermarkMerger{Watermark: defaultUnitWatermark},
 		finders:       finders,       // cheap spec.json / history clues, gated per kind
 		costlyFinders: costlyFinders, // call-graph caller/callee clues (gated + budget-gated)
@@ -656,14 +656,14 @@ func (a *Agent) persistFindings(comments []model.LlmComment) {
 // tagSymbolIDs resolves each comment's enclosing symbol-id (<relpath>::<symbol>)
 // from the post-change file, so callers (e.g. devloop) can key review history by
 // unit instead of by drift-prone line numbers. Best-effort: a comment whose line
-// resolves to no function — or a non-Go/Python file — is left untagged.
+// resolves to no function — or an unsupported file — is left untagged.
 func (a *Agent) tagSymbolIDs(comments []model.LlmComment) {
 	for i := range comments {
 		d := a.findDiff(comments[i].Path)
 		if d == nil || d.NewFileContent == "" {
 			continue
 		}
-		if id, ok := unit.FuncIDAt(comments[i].Path, d.NewFileContent, comments[i].StartLine); ok {
+		if id, ok := unit.FuncIDAtInRepo(a.args.RepoDir, comments[i].Path, d.NewFileContent, comments[i].StartLine); ok {
 			comments[i].SymbolID = id
 		}
 	}

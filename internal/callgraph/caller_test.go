@@ -143,6 +143,7 @@ func newRepo(t *testing.T, files map[string]string) string {
 		{"init"},
 		{"config", "user.email", "t@t"},
 		{"config", "user.name", "t"},
+		{"config", "gc.auto", "0"},
 		{"add", "-A"},
 		{"commit", "-m", "x"},
 	} {

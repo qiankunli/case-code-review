@@ -17,9 +17,9 @@ import (
 // the two into one unit.ClueFinder, so adding a relation or a source never
 // multiplies finder types.
 
-// identifier matches a source identifier (Go/Python); used to scan a Unit's diff
+// identifier matches a source identifier (Go/Python/JavaScript-family); used to scan a Unit's diff
 // for names it references.
-var identifier = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
+var identifier = regexp.MustCompile(`[A-Za-z_$][A-Za-z0-9_$]*`)
 
 // RelatedSymbol is one symbol reached from a review unit along a typed relation —
 // what the relation axis hands to the source axis.

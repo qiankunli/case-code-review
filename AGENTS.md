@@ -23,10 +23,10 @@
 case-code-review/
 ├── cmd/ccr/        CLI 入口：review/scan/config/… 子命令；组装 Args、加载 spec.json
 └── internal/
-    ├── unit/       ★ 两类型两阶段：`Fragment`（原子，Splitter 产：Go go/ast、Python python3）→ Merger 归并成 `Unit`（评审作用域，WatermarkMerger）；context 抽象 Clue(kind×relation) / ClueFinder / Dossier（merge 后挂 `Unit.Dossier`，去重后喂 loop）。详见 `docs/unit-model.md` + `docs/context-model.md`
+    ├── unit/       ★ 两类型两阶段：`Fragment`（原子，Splitter 产：Go go/ast、Python python3、TS/JS TypeScript compiler）→ Merger 归并成 `Unit`（评审作用域，WatermarkMerger）；context 抽象 Clue(kind×relation) / ClueFinder / Dossier（merge 后挂 `Unit.Dossier`，去重后喂 loop）。详见 `docs/unit-model.md` + `docs/context-model.md`
     ├── spec/       ★ 消费 spec.json：SpecFinder/RuleFinder/LinkFinder 把 spec/case/rule/link 找成 Clue（廉价 finder）
     ├── history/    ★ 消费 --history（上轮评审 findings，symbol-id keyed）：Finder 挂成 ClueHistory，渲染成"核验是否已修"的 prompt（廉价 finder；评审反馈闭环的消费侧）
-    ├── callgraph/  ★ caller/callee 邻域上下文（昂贵 finder）：CallerFinder（上溯 governing spec）/ CalleeFinder（下探依赖契约），共享有界 walk（深度 2、每分支停在最近带 spec 的邻居），git grep + go/ast / python3，Go+Python
+    ├── callgraph/  ★ caller/callee 邻域上下文（昂贵 finder）：CallerFinder（上溯 governing spec）/ CalleeFinder（下探依赖契约），共享有界 walk（深度 2、每分支停在最近带 spec 的邻居），git grep + 各语言现场 parser，Go/Python/TS/JS
     ├── agent/      ★ 评审编排：split→找 Clue（廉价 + 按预算闸门的昂贵 finder）→merge→每 review unit 一个 loop；按 Clue 渲染上下文；unit 的 Briefing（briefer 协议按 scope 定预载材料：own source / usage-sites / callchain 邻居函数体，共享预算引擎）；loop 收尾每 unit 落一条 **Debrief**（outcome/formed/降级/成本 → session，指标体系的常开采集面，见 `eval/README.md` §8）；file 级 review-filter；`--dry-run` 只装配上下文、不调 LLM
     ├── diff/       diff/hunk 解析、评论行号解析
     ├── msg/        review 领域消息模型：loop 货币 `[]msg.Msg`，wire 格式只在 lowering 边界出现——`docs/message-model.md`
@@ -42,7 +42,7 @@ case-code-review/
 diff ─Splitter─▶ Fragment ─Merger─▶ Unit ─ClueFinder 找 Clue(spec/case/rule/link + caller/callee)─▶ review loop
 ```
 
-> 即：Splitter 把每个文件 diff 切成 `Fragment`（一函数一个 + 残余）→ Merger 归并成 `Unit`（评审作用域）→ 各 ClueFinder **对 Unit** 找 Clue 挂到 `Unit.Clues`（spec/case/rule/link 廉价直查；caller/callee 经 call-graph 上溯/下探，深度 2、Go+Python）→ 一个 Unit 一个 review loop。context 后置（对最终作用域收一次）。
+> 即：Splitter 把每个文件 diff 切成 `Fragment`（一函数一个 + 残余）→ Merger 归并成 `Unit`（评审作用域）→ 各 ClueFinder **对 Unit** 找 Clue 挂到 `Unit.Clues`（spec/case/rule/link 廉价直查；caller/callee 经 call-graph 上溯/下探，深度 2、Go/Python/TS/JS）→ 一个 Unit 一个 review loop。context 后置（对最终作用域收一次）。
 >
 > **Clue / ClueFinder**：context 抽象的三件——找的动作（`ClueFinder.Find(u Unit) []Clue`，对评审作用域 Unit 找）、找的结果（`Clue{Kind, Text, Ref}`，Text 内联 / Ref 按需指针）、挂哪（`Unit.Clues`，merge 后收）。加一类 context = 加一个 finder，不动主链路。
 
@@ -50,7 +50,7 @@ diff ─Splitter─▶ Fragment ─Merger─▶ Unit ─ClueFinder 找 Clue(spec
 
 1. **评审语义 = 契约守恒，不是找语法 bug**：核对 diff 有没有破坏函数的 spec/case/rule 不变量；**语法 / 静态检查交给 lint 类工具**（Python `ruff`、Go `go build`/`go vet` 之类），不是 ccr 的活。
 2. **diff unit vs review unit 别混**：Splitter 从 diff 切出 diff unit；Merger 归并成 review unit（触发 loop 的那个，可能是单个、也可能是几个沿阶梯归并的更粗 unit）。成本超水位按文件归并——**降 loop 粒度、不降 context**。
-3. **边界现场算、`spec.json` 只语义**：函数边界评审时现场解析（`go/ast`/`python3`）、**永不落盘**（不 stale）；`spec.json` 只有 `FuncID → spec/cases/rules/links`、**无行号**；join key 是 symbol-id `<relpath>::<symbol>`（与 spec-case 一致）。
+3. **边界现场算、`spec.json` 只语义**：函数边界评审时由各语言 parser 现场解析、**永不落盘**（不 stale）；`spec.json` 只有 `FuncID → spec/cases/rules/links`、**无行号**；join key 是 symbol-id `<relpath>::<symbol>`（与 spec-case 一致）。
 4. **上下文分廉价 / 昂贵两档，重活有闸**：廉价 finder（spec.json 查 spec/case/rule/link）总跑；昂贵 finder（caller/callee 的 call-graph grep）走**预算闸门**——diff unit 数超水位就跳（反正要归并、per-func 上下文也被稀释）。link 指向的 doc/函数**内容**仍按需 tool 取，不预塞。
 
 5. **通用操作不就地手写**：先查 stdlib（`slices`/`maps`/内置 `min`/`max`），stdlib 没有的查/进 [`go-stdx`](https://github.com/qiankunli/go-stdx)（自 `pkg/stdx` 孵化毕业，收录纪律见其 AGENTS.md）；第三方 common 库（samber/lo、bytedance/gopkg 等）已评估过暂不引——出现第三个"纯 transform 链"调用点再议。

@@ -10,7 +10,7 @@ import "github.com/qiankunli/case-code-review/internal/gitcmd"
 // functions into one review Unit so a requirement's change is reviewed along the
 // call chain it touched.
 //
-// It reuses callee resolution (go/ast + definition grep) and is therefore costly,
+// It reuses callee resolution (language parser + definition grep) and is therefore costly,
 // so the caller gates it (only when the change stays function-grained). Languages
 // with no callee extraction (e.g. Python today) yield no edges — those functions
 // simply stay unclustered.

@@ -11,7 +11,7 @@ type LlmComment struct {
 	// SymbolID is the enclosing function's symbol-id (<relpath>::<symbol>) the
 	// comment lands in, resolved from the post-change file. Lets callers key review
 	// history by symbol rather than by drift-prone line numbers. Empty when the line
-	// resolves to no function (or a non-Go/Python file).
+	// resolves to no function (or an unsupported file).
 	SymbolID string `json:"symbol_id,omitempty"`
 	// Fingerprint is the finding's stable identity: a short hash of path+content,
 	// deliberately excluding line numbers (relocation and later edits shift them).

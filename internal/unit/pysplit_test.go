@@ -93,6 +93,21 @@ func TestAutoSplitter_RoutesByExtension(t *testing.T) {
 	}
 }
 
+func TestAutoSplitter_RoutesTypeScript(t *testing.T) {
+	requireTypeScriptCompiler(t)
+	frags, err := AutoSplitter{}.Split(model.Diff{
+		NewPath:        "app.ts",
+		Diff:           "@@ -2,1 +2,1 @@\n-  return 0;\n+  return 1;\n",
+		NewFileContent: "function app() {\n  return 1;\n}\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFunc || frags[0].Symbols[0] != "app.ts::app" {
+		t.Fatalf("TypeScript should route to function scope, got %v", ids(frags))
+	}
+}
+
 func TestPyFuncIDAt(t *testing.T) {
 	requirePython3(t)
 	src := "def alpha():\n    helper()\n\n\nclass Svc:\n    def do(self):\n        return validate()\n"

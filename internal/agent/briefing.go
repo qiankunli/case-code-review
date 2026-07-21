@@ -194,7 +194,7 @@ func (a *Agent) renderPieces(ctx context.Context, mats []material) (pieces []pie
 		// bodies as ranged blocks. Span-only materials always take this path;
 		// whole-file fallback additionally needs the ranged_preload gate.
 		if len(m.symbols) > 0 && (!m.whole || a.features.Enabled(feature.RangedPreload)) {
-			if spans := renderSpans(m, content, lines, &budget); len(spans) > 0 {
+			if spans := renderSpans(a.args.RepoDir, m, content, lines, &budget); len(spans) > 0 {
 				pieces = append(pieces, spans...)
 				outcomes = append(outcomes, "ranged "+m.path)
 				continue
@@ -243,10 +243,10 @@ func (a *Agent) renderMaterials(ctx context.Context, mats []material) (unitSourc
 // piece per symbol, mirroring file_read's range output (File header +
 // LINE_RANGE + numbered lines), charging bytes against budget. Returns nil
 // when nothing fit or no symbol resolved to a span.
-func renderSpans(m material, content string, lines []string, budget *int) []piece {
+func renderSpans(repoDir string, m material, content string, lines []string, budget *int) []piece {
 	var out []piece
 	for _, sym := range m.symbols {
-		start, end, ok := unit.SymbolSpan(m.path, content, sym)
+		start, end, ok := unit.SymbolSpanInRepo(repoDir, m.path, content, sym)
 		if !ok || start < 1 || end > len(lines) {
 			continue
 		}
