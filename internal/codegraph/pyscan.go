@@ -132,7 +132,7 @@ func ScanPy(repoDir string) *Extraction {
 // come back nil (language absent, tool missing) without affecting the rest.
 func Scan(repoDir string) *Extraction {
 	merged := &Extraction{Defs: map[string][]Def{}, Refs: map[string]map[string]int{}}
-	for _, ex := range []*Extraction{ScanGo(repoDir), ScanPy(repoDir)} {
+	for _, ex := range []*Extraction{ScanGo(repoDir), ScanPy(repoDir), ScanTS(repoDir)} {
 		if ex == nil {
 			continue
 		}

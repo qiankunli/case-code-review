@@ -1,6 +1,9 @@
 package unit
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -70,6 +73,34 @@ func TestTSFuncSplitter_FallsBackWithoutCompiler(t *testing.T) {
 	}
 	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFile {
 		t.Fatalf("missing compiler should fall back to file scope, got %v", ids(frags))
+	}
+}
+
+func TestTSFuncSplitter_FallsBackWithoutCompilerAPI(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	repo := t.TempDir()
+	moduleDir := filepath.Join(repo, "node_modules", "typescript")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// TypeScript 7.0 deliberately ships without the legacy stable Compiler API.
+	// An installed package is therefore not sufficient to promise AST access.
+	if err := os.WriteFile(filepath.Join(moduleDir, "index.js"),
+		[]byte(`module.exports = { version: "7.0.0" };`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frags, err := (TSFuncSplitter{RepoDir: repo}).Split(model.Diff{
+		NewPath:        "app.ts",
+		Diff:           "@@ -1,1 +1,1 @@\n-old\n+new\n",
+		NewFileContent: "export function app() { return 1; }",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frags) != 1 || UnitOf(frags[0]).Scope != ScopeFile {
+		t.Fatalf("unsupported compiler API should fall back to file scope, got %v", ids(frags))
 	}
 }
 

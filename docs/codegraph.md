@@ -14,7 +14,7 @@
 | caller 上溯找治理 spec | **契约基线错**——按错的 spec 评审 | 类型消解边 |
 | chain merge 邻接 | **评审作用域被污染**——不相干改动并成一条链 | 类型消解边 |
 
-所以图不必全对就能全用：低置信后端（`goscan.go`/`pyscan.go`，名字配对）只喂排序；高置信后端（`gotypes.go`，go/packages 类型检查）喂 scope 决策。**歧义即弃**是高置信侧的铁律：接口分发调用点不建边、仓外目标丢弃——错误的边比没有边更糟（参考 CodeGraph 项目同款纪律）。
+所以图不必全对就能全用：低置信后端（`goscan.go`/`pyscan.go`/`tsscan.go`，名字配对）只喂排序；高置信后端（`gotypes.go`，go/packages 类型检查）喂 scope 决策。**歧义即弃**是高置信侧的铁律：接口分发调用点不建边、仓外目标丢弃——错误的边比没有边更糟（参考 CodeGraph 项目同款纪律）。
 
 ### 复杂度红线（防"自研 codegraph 内卷"）
 
@@ -25,9 +25,10 @@
 ## 流程
 
 ```
-                    ┌── goscan.go (go/ast) ──┐
-diff 种子           ├── pyscan.go (python3 ast)┤→ Extraction (defs/refs) → Rank(PageRank,
-(文件+符号)          └── 未来语言按需 ──────────┘   diff 种子加权) → BuildMap → {{repo_map}}
+                    ┌── goscan.go (go/ast) ─────────────┐
+diff 种子           ├── pyscan.go (python3 ast)─────────┤→ Extraction (defs/refs) → Rank(PageRank,
+(文件+符号)          ├── tsscan.go (TypeScript compiler) ┤   diff 种子加权) → BuildMap → {{repo_map}}
+                    └── 未来语言按需 ────────────────────┘
                                                                               (每 unit prompt)
                     gotypes.go (go/packages + TypesInfo)
                         → CallGraph（类型消解直接调用边，test 文件除外）

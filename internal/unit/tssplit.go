@@ -29,6 +29,9 @@ try {
 } catch {
   process.exit(3);
 }
+if (!ts || typeof ts.createSourceFile !== "function" || !ts.ScriptTarget || !ts.ScriptKind) {
+  process.exit(3);
+}
 
 const chunks = [];
 process.stdin.setEncoding("utf8");
@@ -43,9 +46,11 @@ process.stdin.on("end", () => {
   if (source.parseDiagnostics && source.parseDiagnostics.length > 0) process.exit(2);
 
   const entries = [];
+  const isPrivateIdentifier = (node) =>
+    typeof ts.isPrivateIdentifier === "function" && ts.isPrivateIdentifier(node);
   const nameOf = (name) => {
     if (!name) return "";
-    if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name) ||
+    if (ts.isIdentifier(name) || isPrivateIdentifier(name) ||
         ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
     return "";
   };
