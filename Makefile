@@ -8,12 +8,12 @@ GO          := go
 DIST_DIR    := ./dist
 INSTALL_DIR ?= $(HOME)/.local/bin
 
-# Version info — use git tag if available, fallback to short commit hash
-GIT_TAG     := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "")
+# Version info — VERSION is the release source of truth; commits identify the
+# exact build within that release line.
 GIT_COMMIT  := $(shell git rev-parse --short HEAD)
 BUILD_DATE  := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-VERSION     ?= $(if $(GIT_TAG),$(GIT_TAG),v0.0.0-$(GIT_COMMIT))
+VERSION     ?= $(shell cat VERSION 2>/dev/null || echo v0.0.0)
 
 LD_FLAGS    := -s -w \
 	-X main.Version=$(VERSION) \
